@@ -59,6 +59,9 @@ pub fn val(m: &Metric, r: &Res) -> String {
     if u == "agents/GiB" {
         return format!("{:.1} {u}", r.median);
     }
+    if m.worst_case() && r.max > r.median {
+        return format!("up to {} {u}", num(r.max)).trim_end().to_string();
+    }
     if u.is_empty() { num(r.median) } else { format!("{} {}", num(r.median), u) }
 }
 
@@ -111,12 +114,12 @@ pub fn plain(id: &str) -> Option<(&'static str, &'static str)> {
         "marathon_peak_anon_mib" => ("Peak RAM during a long session", "Highest memory while doing those 300 tool calls. MiB."),
         "after_work_anon_mib_per_agent" => ("RAM right after working", "Each agent just finished a task (20 file reads, a written report), 50 agents running. MiB."),
         "idle_300s_anon_mib_per_agent" => ("RAM 5 min after working", "Same agents, 5 minutes after their task. MiB."),
-        "idle_3600s_anon_mib_per_agent" => ("RAM per agent after work", "Each agent did a task, then waited 1 hour with the others open. Terminal and launched commands included. MiB."),
+        "idle_3600s_anon_mib_per_agent" => ("RAM 1 h after work", "Each agent did a task, then waited 1 hour with the others open. Terminal and launched commands included. MiB."),
         "work_peak_anon_mib_per_agent" => ("Peak RAM while working, agent alone", "Highest memory of the agent itself during its task, without the commands it launched. MiB."),
         "harness_anon_mib_per_agent" => ("RAM of the agent alone", "Waiting agent, without its terminal or the commands it launched. MiB."),
         "terminal_anon_mib_per_agent" => ("RAM of the terminal", "Share of the terminal window per agent (tmux here; a desktop terminal adds about 30 MiB). MiB."),
         "tool_children_anon_mib" => ("RAM of launched commands", "Peak memory of the commands the agents ran, whole fleet. MiB."),
-        "burst_cpu_s_per_agent" => ("CPU when all work at once", "Every agent gets the same task at the same second: processor seconds per agent."),
+        "burst_cpu_s_per_agent" => ("CPU when all work at once", "Every agent gets the same task at the same second: CPU seconds per agent."),
         "burst_turn_s_p50" => ("Task time when all work at once", "Typical time to finish the task while every other agent works too. Seconds."),
         "burst_turn_inflation" => ("Slowdown when all work at once", "Task time with every agent busy, divided by task time alone. 1.0 = no slowdown."),
         "burst_turn_s_p90" => ("Slowest task times when all work at once", "Time the slowest 1 in 10 agents needed. Seconds."),
@@ -124,11 +127,11 @@ pub fn plain(id: &str) -> Option<(&'static str, &'static str)> {
         "resumed_after_turn_anon_mib_per_agent" => ("RAM after reopening and one task", "Reopened session, then one small task done. MiB."),
         "resumed_idle_300s_anon_mib_per_agent" => ("RAM 5 min after reopening", "Reopened session, one task, then 5 min waiting. MiB."),
         "resumed_peak_anon_mib_per_agent" => ("Peak RAM after reopening", "Highest memory between reopening and the end of the first task. MiB."),
-        "idle_anon_mib_per_agent" => ("RAM while waiting, all runs", "Middle value over every fleet run of this size: task, then waiting. MiB."),
+        "idle_anon_mib_per_agent" => ("RAM while waiting, every run of this size", "Middle value over every fleet run of this size: task, then waiting. MiB."),
         "idle_cpu_s_per_agent_hour" => ("CPU while waiting", "CPU seconds per hour while the agent waits for input."),
         "task_anon_mib" => ("RAM for one background task", "One agent doing a small coding task with no screen, peak MiB. Less than with its interface open: no screen, short conversation."),
         "task_rss_mib" => ("RAM incl. shared libraries", "Same task, also counting memory shared with other programs. Overstates what each extra agent costs."),
-        "task_cpu_s" => ("CPU for one task", "Processor seconds one agent uses for the same small coding task."),
+        "task_cpu_s" => ("CPU for one task", "CPU seconds one agent uses for the same small coding task."),
         "task_first_request_s" => ("Start-up time", "Seconds from launch to the agent's first call to the model."),
         "disk_state_mib" => ("Disk used", "Files the agents leave on disk (history, caches) for the whole fleet, in MiB."),
         "first_request_kib" => ("Hidden prompt size", "Instructions and tool list sent with every request; cached after the first, but they still fill the context. KiB."),
@@ -141,8 +144,8 @@ pub fn plain(id: &str) -> Option<(&'static str, &'static str)> {
         "fleet_max_agents_reached" => ("Largest fleet", "Most agents started together that all stayed alive. We tried up to 50."),
         "crash_kill9_recovered_alone" => ("Crash during a command: finished alone", "Killed mid-command, then restarted: does it finish the job without anyone typing?"),
         "crash_kill9_double_execution" => ("Runs a command twice after a crash", "Killed mid-command, then restarted: does it run it again? Risky for a deploy or a payment."),
-        "herd_tasks_done_retry_after" => ("Shared quota: tasks done", "20 agents share one account limited to 30 requests per minute. Share of tasks that still finish."),
-        "herd_tasks_done_no_retry_after" => ("Shared quota, no retry hint", "Same, but the provider does not say when to try again."),
+        "herd_tasks_done_retry_after" => ("Tasks finished", "20 agents share one account limited to 30 requests per minute. Share of tasks that still finish."),
+        "herd_tasks_done_no_retry_after" => ("Tasks finished, no retry hint", "Same, but the provider does not say when to try again."),
         "faults" => ("Survives API and network failures", "We make the AI provider fail on purpose. Tasks still finished, nobody helping."),
         "kill9" => ("Crash during a command", "Did the agent finish alone after a restart, and did it run the interrupted command twice?"),
         _ => return None,
@@ -197,7 +200,7 @@ pub struct Axis {
 
 pub const AXES: [Axis; 5] = [
     Axis { id: "fleet", slug: "fleet", title: "Fleet", blurb: "How many idle agents fit in a GiB of RAM, and the largest fleet that started and stayed alive.", coming: false },
-    Axis { id: "resources", slug: "resources", title: "Resources", blurb: "Memory and processor each agent uses, working and waiting. Start-up time. Disk.", coming: false },
+    Axis { id: "resources", slug: "resources", title: "Resources", blurb: "Memory and CPU each agent uses, working and waiting. Start-up time. Disk.", coming: false },
     Axis { id: "reliability", slug: "failures", title: "Failures", blurb: "What happens when the agent crashes, its terminal closes, the network drops or the AI provider fails.", coming: false },
     Axis { id: "tokens", slug: "tokens", title: "Context weight", blurb: "What the agent sends the model before it reads your code. Sent with every request; cached after the first, but it still fills the context.", coming: false },
     Axis { id: "governance", slug: "governance", title: "Governance", blurb: "Data sent somewhere other than the AI model, and whether planted secrets leak. Full section next edition.", coming: true },
@@ -293,7 +296,7 @@ impl<'a> Site<'a> {
             }
             let rate = m.unit == "rate";
             let k = if rate { 100.0 } else { 1.0 };
-            let mut bs2: Vec<chart::Bar> = rk.iter().map(|(_, h, r)| chart::Bar { name: h.name.clone(), color: color(ed, &h.id, 0), v: r.median * k, lo: if rate { 0.0 } else { r.min }, hi: if rate { 0.0 } else { r.max }, label: if rate { val(m, r) } else { val(m, r).trim_end_matches(unit(m)).trim().to_string() }, note: String::new() }).collect();
+            let mut bs2: Vec<chart::Bar> = rk.iter().map(|(_, h, r)| chart::Bar { name: h.name.clone(), color: color(ed, &h.id, 0), v: m.key(r) * k, lo: if rate { 0.0 } else { r.min }, hi: if rate { 0.0 } else { r.max }, label: if rate { val(m, r) } else { val(m, r).trim_end_matches(unit(m)).trim().to_string() }, note: String::new() }).collect();
             if ed.common_steps(mid).is_some() {
                 for (b, x) in bs2.iter_mut().zip(rk.iter()) {
                     if let Some(mb) = x.2.session_mb { b.note = format!("{mb:.1} MB history{}", if x.2.grow_note.is_some() { " *" } else { "" }); }
@@ -411,7 +414,7 @@ impl<'a> Site<'a> {
 
     fn findings(&self, ed: &Edition) -> String {
         let mut f: Vec<(String, String)> = Vec::new();
-        let (mid, lab) = if ed.ranking("idle_3600s_anon_mib_per_agent").len() >= 2 { ("idle_3600s_anon_mib_per_agent", "RAM per agent after work") } else if ed.ranking("marathon_idle_anon_mib").len() >= 2 { ("marathon_idle_anon_mib", "RAM after a long session") } else { ("idle_anon_mib_per_agent", "RAM at fresh start") };
+        let (mid, lab) = if ed.ranking("idle_3600s_anon_mib_per_agent").len() >= 2 { ("idle_3600s_anon_mib_per_agent", "RAM 1 h after work") } else if ed.ranking("marathon_idle_anon_mib").len() >= 2 { ("marathon_idle_anon_mib", "RAM after a long session") } else { ("idle_anon_mib_per_agent", "RAM at fresh start") };
         let fd = ed.ranking(mid);
         if fd.len() >= 2 {
             let (b, w) = (fd.first().unwrap(), fd.last().unwrap());
@@ -447,7 +450,7 @@ impl<'a> Site<'a> {
     }
 
     fn compare() -> &'static str {
-        r#"<div class="cmp"><div><h3>Harness-Bench</h3><p class="eyebrow">Qihoo 360 · arXiv 2605.27922</p><p>Same models across harnesses on realistic sandboxed tasks. Unit: quality and API cost per task.</p></div><div><h3>HarnessTax</h3><p class="eyebrow">Arena</p><p>Model–harness pairs on SWE-bench Lite and Terminal-Bench. Unit: what the harness adds to tokens and dollars per task.</p></div><div class="us"><h3>AgentRAMBench</h3><p class="eyebrow">agentrambench.com</p><p>One to fifty agents on one machine, with a stand-in AI model. Unit: the machine: memory, processor, waste while waiting, crashes, outages.</p></div></div><p class="mut" style="font-size:14px">Use them together: they tell you which harness solves the task; this tells you how many of them your machine can run, and what breaks when it does.</p>"#
+        r#"<div class="cmp"><div><h3>Harness-Bench</h3><p class="eyebrow">Qihoo 360 · arXiv 2605.27922</p><p>Same models across harnesses on realistic sandboxed tasks. Unit: quality and API cost per task.</p></div><div><h3>HarnessTax</h3><p class="eyebrow">Arena</p><p>Model–harness pairs on SWE-bench Lite and Terminal-Bench. Unit: what the harness adds to tokens and dollars per task.</p></div><div class="us"><h3>AgentRAMBench</h3><p class="eyebrow">agentrambench.com</p><p>One to fifty agents on one machine, with a mock model. Unit: the machine: memory, CPU, waste while waiting, crashes, outages.</p></div></div><p class="mut" style="font-size:14px">Use them together: they tell you which harness solves the task; this tells you how many of them your machine can run, and what breaks when it does.</p>"#
     }
 
     fn rerun(&self, ed: &Edition) -> String {
@@ -473,7 +476,7 @@ impl<'a> Site<'a> {
         let ed = self.ed();
         let n = ed.measured().len();
         let mut b = String::new();
-        write!(b, r#"<div class="wrap"><section class="hero"><div><p class="eyebrow">Edition {} · {} harnesses · measured {}</p><h1 style="margin-top:12px">How much RAM does your AI agent harness eat?</h1><p class="lede">How much memory and processor coding agents like Claude Code and Codex CLI use, and what happens when something breaks.</p></div>"#, esc(&ed.id), n, esc(&ed.measured_span())).unwrap();
+        write!(b, r#"<div class="wrap"><section class="hero"><div><p class="eyebrow">Edition {} · {} harnesses · measured {}</p><h1 style="margin-top:12px">How much RAM does your AI agent harness eat?</h1><p class="lede">How much memory and CPU coding agents like Claude Code and Codex CLI use, and what happens when something breaks.</p></div>"#, esc(&ed.id), n, esc(&ed.measured_span())).unwrap();
         b.push_str(&self.findings(ed));
         b.push_str("</section>");
         b.push_str(&Self::pills("/"));
@@ -507,7 +510,7 @@ impl<'a> Site<'a> {
             }
         }
         b.push_str("</div>");
-        b.push_str(r#"<p class="mut" style="font-size:13px;margin-top:10px">Default settings, no extensions, tmux terminal, a test model instead of a real one, one run per cell, one desktop machine. Real setups with extensions and a desktop terminal use more.</p>"#);
+        b.push_str(r#"<p class="mut" style="font-size:13px;margin-top:10px">Default settings, no extensions, tmux terminal, a mock model instead of a real one, one run per cell, one desktop machine. Real setups with extensions and a desktop terminal use more.</p>"#);
         b.push_str(r#"<h2 id="leaderboard">Leaderboard</h2><p class="sub">Every headline number per harness. Click a harness for all measurements.</p>"#);
         b.push_str(&self.scoreboard(ed, ""));
         b.push_str(r#"<h2>Per task, or per machine</h2>"#);
@@ -516,7 +519,7 @@ impl<'a> Site<'a> {
         b.push_str(&self.rerun(ed));
         b.push_str("</div>");
         let stat = ed.ranking(primary(ed)).first().map(|x| (format!("{} MiB", num(x.2.median)), format!("lowest · {}", x.1.name)));
-        let og = Og { kicker: format!("Edition {} · {} harnesses", ed.id, n), title: "How much RAM does your AI agent harness eat?".into(), sub: format!("{}, same test model", plain(primary(ed)).map(|p| p.0).unwrap_or("Private RAM")), stat, bars: og_bars(ed), prelim: ed.preliminary() };
+        let og = Og { kicker: format!("Edition {} · {} harnesses", ed.id, n), title: "How much RAM does your AI agent harness eat?".into(), sub: format!("{}, same mock model", plain(primary(ed)).map(|p| p.0).unwrap_or("Private RAM")), stat, bars: og_bars(ed), prelim: ed.preliminary() };
         self.page("/", "How much RAM does your AI agent harness eat?", "What a fleet of coding agents costs the machine: RAM and CPU per agent, idle cost, fleets up to 50 agents, kill -9 and provider outages. Claude Code, Codex CLI, opencode, Pi.", og, &b);
     }
 
@@ -601,7 +604,7 @@ impl<'a> Site<'a> {
         if a.id == "reliability" {
             b.push_str(r#"<h2 id="crash">Crash and resume</h2><p>We kill the agent while it runs a command, then restart it the way its docs say. Does it finish the job without anyone typing? Does it run the interrupted command a second time? Running twice is harmless for tests, dangerous for a deploy, a payment or a database change.</p>"#);
             b.push_str(&self.crash_matrix(ed));
-            b.push_str(r#"<h2 id="faults">Provider and network faults</h2><p>Our stand-in for the AI provider fails on purpose after its first answer: too many requests, rejected key, overload, network cuts, silence, broken answers. Each row is one kind of failure.</p>"#);
+            b.push_str(r#"<h2 id="faults">Provider and network faults</h2><p>Our mock model fails on purpose after its first answer: too many requests, rejected key, overload, network cuts, silence, broken answers. Each row is one kind of failure.</p>"#);
             b.push_str(&self.fault_matrix(ed));
         }
         let mut ms: Vec<&Metric> = ed.metrics.iter().filter(|m| m.axis == a.id && !(a.id == "reliability" && (m.id.starts_with("crash_") || m.id.starts_with("fault_")))).collect();
@@ -646,7 +649,7 @@ impl<'a> Site<'a> {
         if h.status != "measured" {
             write!(b, r#"<p class="lede">Not measurable: {}.</p><p>A harness is measurable when it can talk to a model endpoint we choose, so every harness sees the same deterministic mock. <a href="/submit/">What it takes to be ranked</a>.</p></div></section></div>"#, esc(h.reason.as_deref().unwrap_or("no reason recorded"))).unwrap();
             let og = Og { kicker: "Harness".into(), title: h.name.clone(), sub: format!("Not measurable: {}", h.reason.clone().unwrap_or_default()), stat: None, bars: vec![], prelim: ed.preliminary() };
-            self.page(&format!("/harness/{sl}/"), &h.name, &format!("{} is not measurable on AgentRAMBench: {}", h.name, h.reason.clone().unwrap_or_default()), og, &b);
+            self.page(&format!("/harness/{sl}/"), &h.name, &format!("{} is not measurable offline on AgentRAMBench: {}.", h.name, h.reason.clone().unwrap_or_default().trim_end_matches('.')), og, &b);
             return;
         }
         let pm = primary(ed);
@@ -680,7 +683,8 @@ impl<'a> Site<'a> {
                 let rk = ed.ranking(&m.id);
                 let me = rk.iter().find(|x| x.1.id == h.id).map(|x| x.0).unwrap_or(0);
                 let tied = rk.len() > 1 && rk.iter().all(|x| x.0 == 1);
-                let best = if tied { "all tied".to_string() } else { rk.first().map(|x| format!("{} · {}", val(m, x.2), x.1.name)).unwrap_or_default() };
+                let lead = rk.iter().filter(|x| x.0 == 1).count();
+                let best = if tied { "all tied".to_string() } else if lead > 1 { rk.first().map(|x| format!("{} · {lead} tied", val(m, x.2))).unwrap_or_default() } else { rk.first().map(|x| format!("{} · {}", val(m, x.2), x.1.name)).unwrap_or_default() };
                 let me = if tied { "–".to_string() } else { format!("{me} of {}", rk.len()) };
                 let p = if m.unit == "rate" && is_binary(r) { pips(m, r) + " " } else { String::new() };
                 let anchor = if a.id == "reliability" && m.id.starts_with("crash_") { "crash".to_string() } else if m.id.starts_with("fault_") { "faults".to_string() } else { m.id.clone() };
@@ -691,7 +695,7 @@ impl<'a> Site<'a> {
         let (bsvg, bw) = badge(ed, h);
         write!(b, r#"<h2>README badge</h2><div class="badge-prev"><img src="/badge/{sl}.svg" alt="AgentRAMBench badge for {n}" width="{bw}" height="20"></div><pre tabindex="0"><code>[![AgentRAMBench]({BASE}/badge/{sl}.svg)]({BASE}/harness/{sl}/)</code></pre><p class="mut" style="font-size:14px">The badge always shows the latest edition. It is a static SVG: no tracking, no script.</p></div>"#, n = esc(&h.name)).unwrap();
         let og = Og { kicker: format!("Edition {}", ed.id), title: h.name.clone(), sub: short_ver(h), stat, bars: vec![], prelim: ed.preliminary() };
-        let desc = format!("{} on AgentRAMBench: RAM and CPU per agent, idle cost, agents per GiB of RAM, kill -9 and fault recovery. Edition {}.", h.name, ed.id);
+        let desc = format!("{} on AgentRAMBench: RAM 1 h after work, CPU while waiting, long sessions, crash and fault recovery. Edition {}.", h.name, ed.id);
         self.page(&format!("/harness/{sl}/"), &h.name, &desc, og, &b);
         self.write(&format!("/badge/{sl}.svg"), bsvg.as_bytes());
     }
@@ -718,7 +722,7 @@ impl<'a> Site<'a> {
         b.push_str(r#"<h2>Scenarios</h2><ul>
 <li><b>Fixed task.</b> One agent fixes a failing test in a small Python project: read, edit, run tests, answer. Peak private RAM, CPU, start-up time, request count and size.</li>
 <li><b>Fleet after work.</b> 5, 10, 25 or 50 interactive agents in one tmux server. Each does a task (20 file reads and a written report), then waits 1 hour. Memory read right after the task and at 5, 15, 30 and 60 min, split into agent, terminal and launched commands. Processor use and network traffic while waiting, disk state. 50 is the most we tried; opencode overflowed our 20 GiB limit at 50 and was measured at 25.</li>
-<li><b>All at once.</b> After the wait, every agent gets the same 3-step task at the same second: processor per agent and task time, compared with one agent alone.</li>
+<li><b>All at once.</b> After the wait, every agent gets the same 3-step task at the same second: CPU per agent and task time, compared with one agent alone.</li>
 <li><b>Long session.</b> One agent makes 300 tool calls (about 1 million tokens of history, each harness compacting by its default), then waits 5 min. Memory during and after.</li>
 <li><b>Reopened session.</b> The same work (5, 60 or 300 file reads) is done without a screen, the agent is killed, then the session is reopened in the normal interactive interface. Memory after reopening, after one task and 5 min later. The first request after reopening is checked to contain the history.</li>
 <li><b>Fresh start.</b> 5 agents, one short task (about 320 KB of tool output), then 5 min waiting. The lightest case; kept for comparison.</li>
@@ -728,7 +732,7 @@ impl<'a> Site<'a> {
         b.push_str(r#"<h2>How numbers are reported</h2><ul><li>When a cell has several runs, the big number is the middle value (median), with lowest–highest and every value in the JSON. Many fleet cells have one run; the leaderboard says n=1. Rates show one square per run.</li><li>Memory is private (anonymous) memory from the cgroup: what an extra agent really adds. RSS counts shared libraries once per process and is shown only as a secondary metric.</li><li>Headline: private RAM per agent 1 hour after work, terminal and launched commands included, at the largest fleet each harness ran (50; opencode 25). Per-hour figures come from the 1-hour wait, never scaled up from shorter windows. Not a weighted score. There is no overall score.</li><li>Network bytes are a lower bound (socket sampling every 2 s). Token counts are request bytes / 4, an estimate, not a tokenizer.</li><li>Ranks are per metric. Ties share a rank.</li></ul>"#);
         b.push_str(r#"<h2>Every metric in this edition</h2><div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Metric</th><th scope="col">Axis</th><th scope="col">Better</th><th scope="col">How</th></tr></thead><tbody>"#);
         for mm in &ed.metrics {
-            write!(b, r#"<tr><th scope="row" class="sticky" style="white-space:normal;font-weight:400">{}<span class="ver">{}</span></th><td>{}</td><td>{}</td><td style="font-size:13px">{}</td></tr>"#, esc(&mm.label), esc(&mm.id), axis_of(&mm.axis).title, esc(&mm.better), esc(mm.note.as_deref().unwrap_or(""))).unwrap();
+            write!(b, r#"<tr><th scope="row" class="sticky" style="white-space:normal;font-weight:400">{}<span class="ver">{}</span></th><td>{}</td><td>{}</td><td style="font-size:13px">{}</td></tr>"#, esc(&short(&mm.id, Some(mm))), esc(&mm.id), axis_of(&mm.axis).title, esc(&mm.better), esc(&[plain(&mm.id).map(|p| p.1.to_string()).unwrap_or_else(|| mm.label.clone()), mm.note.clone().unwrap_or_default()].iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(" "))).unwrap();
         }
         b.push_str("</tbody></table></div>");
         b.push_str(r#"<h2>Related work</h2>"#);
@@ -918,7 +922,7 @@ mod tests {
         assert!(f.contains("Codex CLI 28.4 MiB · opencode 526 MiB"), "{f}");
         assert!(f.contains("opencode: 50 agents overflowed the 20 GiB limit we set; measured at 25"), "{f}");
         assert!(f.contains("Only Codex CLI did not run the command a second time after restart"), "{f}");
-        assert!(f.find("RAM per agent after work") < f.find("Ran out of memory") && f.find("Ran out of memory") < f.find("Killed mid-command"), "{f}");
+        assert!(f.find("RAM 1 h after work") < f.find("Ran out of memory") && f.find("Ran out of memory") < f.find("Killed mid-command"), "{f}");
         let f = site().findings(&ed(&ms, &rows("[1,1,1]")));
         assert!(f.contains("0 of 4 harnesses finish the job on their own"), "{f}");
     }

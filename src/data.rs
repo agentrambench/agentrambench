@@ -94,6 +94,16 @@ pub struct Edition {
     pub raw: String,
 }
 
+impl Metric {
+    pub fn worst_case(&self) -> bool {
+        self.axis == "governance" && self.better == "lower"
+    }
+
+    pub fn key(&self, r: &Res) -> f64 {
+        if self.worst_case() { r.max } else { r.median }
+    }
+}
+
 impl Edition {
     pub fn load(path: &Path) -> Result<Edition, String> {
         let raw = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -179,12 +189,12 @@ impl Edition {
             .collect();
         let higher = m.better == "higher";
         rows.sort_by(|a, b| {
-            let o = a.1.median.partial_cmp(&b.1.median).unwrap();
+            let o = m.key(a.1).partial_cmp(&m.key(b.1)).unwrap();
             if higher { o.reverse() } else { o }
         });
         let mut out = Vec::new();
         for (i, (h, r)) in rows.iter().enumerate() {
-            let rank = if i > 0 && rows[i - 1].1.median == r.median { out.last().map(|x: &(u32, &Harness, &Res)| x.0).unwrap() } else { i as u32 + 1 };
+            let rank = if i > 0 && m.key(rows[i - 1].1) == m.key(r) { out.last().map(|x: &(u32, &Harness, &Res)| x.0).unwrap() } else { i as u32 + 1 };
             out.push((rank, *h, *r));
         }
         out
@@ -396,6 +406,18 @@ pub mod tests {
         assert_eq!(e.measured_span(), "2026-11-07");
         let e = ed(&m("a", "lower"), &r("pi", "a", 1, None, 1.0, ""));
         assert_eq!(e.measured_span(), e.edition);
+    }
+
+    #[test]
+    fn governance_ranks_on_worst_run() {
+        // review 07/11 #17: codex task upload runs 0,0,0,0,613 KiB had median 0, tied with pi (0-0) and got "Best"
+        let gm = r#"{"id":"task_net_out_kib","axis":"governance","label":"l","better":"lower"}"#;
+        let rs = [r("codex", "task_net_out_kib", 1, None, 0.0, r#","max":613,"values":[0,0,0,0,613]"#).replace(r#""max":0,"#, ""), r("pi", "task_net_out_kib", 1, None, 0.0, "")];
+        let e = ed(gm, &rs.join(","));
+        let k: Vec<(u32, &str)> = e.ranking("task_net_out_kib").iter().map(|x| (x.0, x.1.id.as_str())).collect();
+        assert_eq!(k, vec![(1, "pi"), (2, "codex")]);
+        let e = ed(&m("task_net_out_kib", "lower"), &rs.join(","));
+        assert_eq!(e.ranking("task_net_out_kib")[1].0, 1, "non-governance metrics still rank on median");
     }
 
     #[test]
