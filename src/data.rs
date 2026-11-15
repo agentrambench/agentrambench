@@ -30,6 +30,7 @@ pub struct Harness {
     pub status: String,
     pub non_default_flags: Option<String>,
     pub reason: Option<String>,
+    pub provisional: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -81,6 +82,7 @@ pub struct Edition {
     pub machine: Machine,
     pub status: Option<String>,
     pub reproduce: Option<Reproduce>,
+    pub raw_archive: Option<String>,
     #[serde(default)]
     pub fault_labels: BTreeMap<String, String>,
     pub harnesses: Vec<Harness>,

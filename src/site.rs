@@ -273,7 +273,7 @@ impl<'a> Site<'a> {
     }
 
     fn bar_card(&self, ed: &Edition, mid: &str, title: &str, link: &str, short_sub: &str) -> Option<String> {
-        let bs: Vec<chart::Bar>;
+        let mut bs: Vec<chart::Bar>;
         let (sub, better);
         let mut src: Vec<String> = vec![];
         if mid == "faults" {
@@ -310,6 +310,11 @@ impl<'a> Site<'a> {
             src = rk.iter().map(|x| x.2.source.clone()).collect::<Vec<_>>();
             better = if m.better == "higher" { "Higher is better" } else { "Lower is better" };
             sub = if !short_sub.is_empty() { short_sub.to_string() } else if unit(m).is_empty() || plain(mid).is_some() { base } else { format!("{base} · {}", unit(m)) };
+        }
+        for b in bs.iter_mut() {
+            if ed.harnesses.iter().any(|h| h.name == b.name && h.provisional.is_some()) {
+                b.note = if b.note.is_empty() { "provisional".into() } else { format!("{} · provisional", b.note) };
+            }
         }
         let missing: Vec<String> = ed.measured().iter().filter(|h| !bs.iter().any(|b| b.name == h.name)).map(|h| h.name.clone()).collect();
         src.sort();
@@ -397,7 +402,7 @@ impl<'a> Site<'a> {
     }
 
     fn row(&self, s: &mut String, ed: &Edition, h: &Harness, rank: &str, cols: &[(&str, &str)]) {
-        write!(s, r#"<tr><td class="rank">{rank}</td><th scope="row" class="sticky"><span class="sw" style="background:{}"></span><a href="/harness/{}/">{}</a><span class="ver">{}</span></th>"#, color(ed, &h.id, 0), hslug(h), esc(&h.name), esc(&short_ver(h).rsplit(' ').next().map(|v| format!("v{}", v.trim_start_matches('v'))).unwrap_or_default())).unwrap();
+        write!(s, r#"<tr><td class="rank">{rank}</td><th scope="row" class="sticky"><span class="sw" style="background:{}"></span><a href="/harness/{}/">{}</a>{}<span class="ver">{}</span></th>"#, color(ed, &h.id, 0), hslug(h), esc(&h.name), if h.provisional.is_some() { r#" <span class="prov" title="provisional: see harness page">provisional</span>"# } else { "" }, esc(&short_ver(h).rsplit(' ').next().map(|v| format!("v{}", v.trim_start_matches('v'))).unwrap_or_default())).unwrap();
         for (m, _) in cols {
             s.push_str(&self.cell(ed, h, m));
         }
@@ -648,6 +653,9 @@ impl<'a> Site<'a> {
         let pl = plain(pm).map(|p| p.0).unwrap_or(pm);
         let fd = ed.result(&h.id, pm);
         let n = ed.measured().len();
+        if let Some(p) = &h.provisional {
+            write!(b, r#"<div class="notice" role="note"><b>Provisional.</b> {}</div>"#, esc(p)).unwrap();
+        }
         b.push_str(r#"<div class="hgrid"><div>"#);
         let stat = if let Some(r) = fd {
             let rank = ed.ranking(pm).iter().find(|x| x.1.id == h.id).map(|x| x.0).unwrap_or(0);
@@ -735,7 +743,7 @@ impl<'a> Site<'a> {
     pub fn submit(&mut self) {
         let ed = self.ed();
         let mut b = String::from(r#"<div class="wrap prose"><section class="hero solo"><div><p class="eyebrow">Submit</p><h1>Put your harness on the bench</h1><p class="lede">One pull request. If your harness can talk to a model endpoint we choose, it gets measured in the next edition, under the same rules as everyone else.</p></div></section>"#);
-        write!(b, r#"<h2>Requirements</h2><ul><li>Runs on Linux, installs at a pinned version (npm, pip, cargo, a release binary).</li><li>Accepts a custom endpoint and API key for the Anthropic Messages, OpenAI Responses or Gemini API. Without it, the harness is listed as <i>not measurable offline</i>, with the reason.</li><li>Runs a prompt headless, and can run interactively in a terminal (for the idle fleet and closed-terminal tests).</li><li>Documents how to resume an interrupted session, if it can.</li></ul><h2>The pull request</h2><ol><li>Add an adapter to <code>harnesses.py</code> in <a href="{BENCH}">the AgentRAMBench runner</a>: install command, version, how to set the endpoint, headless and interactive commands, resume command.</li><li>List every non-default flag you need. It is printed on your harness page.</li><li>Run <code>python3 hb.py quick --harness yours</code> and attach the output of <code>python3 export.py</code>.</li></ol><h2>What happens next</h2><ul><li>The maintainer reruns your adapter with the full profile, on the same machine as every other harness, for the next edition. Results are published whether they flatter the harness or not.</li><li>Vendors can contest a number by sending a reproducible run to <a href="mailto:contact@agentrambench.com">contact@agentrambench.com</a>. Corrections are listed on the edition page.</li><li>No harness gets a different scenario, a longer timeout or a private rerun.</li></ul></div>"#).unwrap();
+        write!(b, r#"<h2>Requirements</h2><ul><li>Runs on Linux, installs at a pinned version (npm, pip, cargo, a release binary).</li><li>Accepts a custom endpoint and API key for the Anthropic Messages, OpenAI Responses or Gemini API. Without it, the harness is listed as <i>not measurable offline</i>, with the reason.</li><li>Runs a prompt headless, and can run interactively in a terminal (for the idle fleet and closed-terminal tests).</li><li>Documents how to resume an interrupted session, if it can.</li></ul><h2>The pull request</h2><ol><li>Add an adapter to <code>harnesses.py</code> in <a href="{BENCH}">the AgentRAMBench runner</a>: install command, version, how to set the endpoint, headless and interactive commands, resume command.</li><li>List every non-default flag you need. It is printed on your harness page.</li><li>Run <code>python3 hb.py quick --harness yours</code>, then <code>python3 export.py</code>, and attach <code>results/public/agentrambench.json</code> plus a tarball of the <code>results/raw/</code> run folders it was built from.</li></ol><h2>What happens next</h2><ul><li>The maintainer reruns your adapter with the full profile, on the same machine as every other harness, for the next edition. Results are published whether they flatter the harness or not.</li><li>Vendors can contest a number by sending a reproducible run to <a href="mailto:contact@agentrambench.com">contact@agentrambench.com</a>. Corrections are listed on the edition page.</li><li>No harness gets a different scenario, a longer timeout or a private rerun.</li></ul></div>"#).unwrap();
         let og = Og { kicker: "Submit".into(), title: "Put your harness on the bench".into(), sub: "One pull request. Same rules for everyone.".into(), stat: None, bars: vec![], prelim: ed.preliminary() };
         self.page("/submit/", "Submit your harness", "Add a coding-agent harness to AgentRAMBench with one pull request: requirements, adapter, quick run.", og, &b);
     }
@@ -744,7 +752,7 @@ impl<'a> Site<'a> {
         let ed = self.ed();
         let mut b = String::from(r#"<div class="wrap prose"><section class="hero solo"><div><p class="eyebrow">Data</p><h1>Every number, raw</h1><p class="lede">Each edition is one JSON file in the <code>agentrambench/1</code> schema, plus a flat CSV of the same results. Every value carries its run count, min, max, all individual runs, and the raw run directory it came from.</p></div></section><div class="tbl"><table><thead><tr><th scope="col">Edition</th><th scope="col">Status</th><th scope="col">Harnesses</th><th scope="col">Results</th><th scope="col">Files</th></tr></thead><tbody>"#);
         for e in self.eds {
-            write!(b, r#"<tr><td class="mono"><a href="/editions/{id}/">{id}</a></td><td>{}</td><td>{}</td><td class="mono">{}</td><td class="mono"><a href="/data/agentrambench-{id}.json" download>json</a> · <a href="/data/agentrambench-{id}.csv" download>csv</a></td></tr>"#, if e.preliminary() { "preliminary" } else { "final" }, format!("{} measured, {} not measurable", e.measured().len(), e.harnesses.len() - e.measured().len()), e.results.len(), id = esc(&e.id)).unwrap();
+            write!(b, r#"<tr><td class="mono"><a href="/editions/{id}/">{id}</a></td><td>{}</td><td>{}</td><td class="mono">{}</td><td class="mono"><a href="/data/agentrambench-{id}.json" download>json</a> · <a href="/data/agentrambench-{id}.csv" download>csv</a>{raw}</td></tr>"#, if e.preliminary() { "preliminary" } else { "final" }, format!("{} measured, {} not measurable", e.measured().len(), e.harnesses.len() - e.measured().len()), e.results.len(), id = esc(&e.id), raw = e.raw_archive.as_deref().map(|u| format!(r#" · <a href="{}">raw runs</a>"#, esc(u))).unwrap_or_default()).unwrap();
         }
         b.push_str(r#"</tbody></table></div><h2>Schema</h2><pre><code>{
   "schema": "agentrambench/1",

@@ -2,13 +2,14 @@
  "schema": "agentrambench/1",
  "status": "preliminary",
  "reproduce": {
-  "command": "python3 hb.py quick && python3 export.py",
+  "command": "git clone https://github.com/agentrambench/bench && cd bench && ./setup.sh && python3 hb.py quick && python3 export.py",
   "minutes": 15,
-  "repo": null
+  "repo": "https://github.com/agentrambench/bench"
  },
- "edition": "2026-11-15",
- "generated": "2026-11-15T02:43:09+0100",
- "bench_commit": "ba51bd3",
+ "edition": "2026-11",
+ "frozen": "2026-11-15",
+ "generated": "2026-11-15T14:19:56+0100",
+ "bench_commit": "47d333e",
  "llm": "local deterministic mock (Anthropic Messages / OpenAI Responses / Gemini generateContent); no real model",
  "machine": {
   "cpu": "Intel(R) Core(TM) i7-10700KF CPU @ 3.80GHz",
@@ -36,7 +37,8 @@
    "codex": "crash-20261106-141500",
    "opencode": "crash-20261106-141500",
    "pi": "crash-20261106-141500",
-   "crush": "crash-20261115-000257"
+   "crush": "crash-20261115-000257",
+   "goose": "crash-20261115-120732"
   },
   "fault": {
    "claude": "fault-20261106-141450",
@@ -50,7 +52,8 @@
    "codex": "herd-20261106-162244",
    "opencode": "herd-20261106-162244",
    "pi": "herd-20261106-162244",
-   "crush": "herd-20261115-005018"
+   "crush": "herd-20261115-005018",
+   "goose": "herd-20261115-124316"
   }
  },
  "fleet_comparable": {
@@ -84,7 +87,8 @@
    "name": "Pi",
    "version": "pi-coding-agent 1.4.0 (npm upstream)",
    "status": "measured",
-   "non_default_flags": "models.json anthropic baseUrl+key; settings defaultProvider/defaultModel"
+   "non_default_flags": "models.json anthropic baseUrl+key; settings defaultProvider/defaultModel",
+   "provisional": "These Pi numbers come from a system-wide install missing two declared dependencies (telemetry, AWS Bedrock SDK). A normal npm install uses about 16 MiB more per process. Full rerun with the npm install on the night of 16 to 17 Nov."
   },
   {
    "id": "crush",
@@ -93,6 +97,15 @@
    "status": "measured",
    "non_default_flags": "crushrc: provider add (type messages, base-url, dummy key) + model add; -y (yolo); -m model; XDG_RUNTIME_DIR private; project-init dialog pre-dismissed (.crush/init); Go binary run directly, not the npm node wrapper",
    "note": "measured as the Go binary (the npm package adds a Node wrapper process)"
+  },
+  {
+   "id": "goose",
+   "name": "Goose",
+   "version": "goose 1.59.1",
+   "status": "measured",
+   "non_default_flags": "GOOSE_PROVIDER=anthropic, GOOSE_MODEL, ANTHROPIC_HOST+ANTHROPIC_API_KEY, GOOSE_DISABLE_KEYRING=1, GOOSE_MODE=auto; telemetry consent pre-answered with its default (yes)",
+   "note": "line-based interactive CLI, not full-screen; its developer tools run in-process (no separate MCP process observed in 1.59.1)",
+   "provisional": "Partial: crash, shared quota and small fleets so far. Task, faults, 50-agent fleet, long session and reopened sessions run on the night of 15 to 16 Nov."
   },
   {
    "id": "cursor-cli",
@@ -240,7 +253,7 @@
    "unit": "agents/GiB",
    "better": "higher",
    "headline": false,
-   "note": "1024 / private MiB per agent, terminal included; ranked at each harness's largest fleet (50; opencode 25)"
+   "note": "1024 / idle private MiB per agent (terminal included); rank only results with comparable=true (same N and hold for every harness, see fleet_comparable)"
   },
   {
    "id": "after_work_anon_mib_per_agent",
@@ -283,7 +296,7 @@
    "unit": "MiB",
    "better": "lower",
    "headline": false,
-   "note": "Pss_Anon of the private tmux server / N; a GUI terminal costs more (kitty: about 29 MiB per window, measured separately)"
+   "note": "Pss_Anon of the private tmux server / N; a GUI terminal costs more (kitty measured at ~29 MiB per window on the same host)"
   },
   {
    "id": "tool_children_anon_mib",
@@ -3117,6 +3130,154 @@
     0.0
    ],
    "source": "herd-20261115-005018"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_kill9_recovered_alone",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_kill9_double_execution",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 1.0,
+   "min": 1.0,
+   "max": 1.0,
+   "values": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_scope_recovered_alone",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_scope_double_execution",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_term_recovered_alone",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_term_double_execution",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 1.0,
+   "min": 1.0,
+   "max": 1.0,
+   "values": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_stream_recovered_alone",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "crash_stream_double_execution",
+   "n_agents": 1,
+   "runs": 3,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "source": "crash-20261115-120732"
+  },
+  {
+   "harness": "goose",
+   "metric": "herd_tasks_done_retry_after",
+   "n_agents": 20,
+   "runs": 2,
+   "median": 1.0,
+   "min": 1.0,
+   "max": 1.0,
+   "values": [
+    1.0,
+    1.0
+   ],
+   "source": "herd-20261115-124316"
+  },
+  {
+   "harness": "goose",
+   "metric": "herd_tasks_done_no_retry_after",
+   "n_agents": 20,
+   "runs": 2,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0,
+    0.0
+   ],
+   "source": "herd-20261115-124316"
   },
   {
    "harness": "claude",
@@ -7774,6 +7935,437 @@
     50
    ],
    "source": "idle-crush-10-hblong-tmux-20261114-221809,idle-crush-50-hblong-tmux-20261114-223528"
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 112.5,
+   "min": 112.5,
+   "max": 112.5,
+   "values": [
+    112.5
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_cpu_s_per_agent_hour",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 0.24,
+   "min": 0.24,
+   "max": 0.24,
+   "values": [
+    0.24
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_net_out_kib_per_agent_hour",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "disk_state_mib",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 13.2,
+   "min": 13.2,
+   "max": 13.2,
+   "values": [
+    13.2
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "fleet_agents_per_gib",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 9.102,
+   "min": 9.102,
+   "max": 9.102,
+   "values": [
+    9.102
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "after_work_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 112.4,
+   "min": 112.4,
+   "max": 112.4,
+   "values": [
+    112.4
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "harness_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 110.1,
+   "min": 110.1,
+   "max": 110.1,
+   "values": [
+    110.1
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "terminal_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 2.5,
+   "min": 2.5,
+   "max": 2.5,
+   "values": [
+    2.5
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "tool_children_anon_mib",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "work_peak_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 110.1,
+   "min": 110.1,
+   "max": 110.1,
+   "values": [
+    110.1
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_300s_anon_mib_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 112.5,
+   "min": 112.5,
+   "max": 112.5,
+   "values": [
+    112.5
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300,
+   "comparable": false
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_cpu_s_per_agent",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 0.237,
+   "min": 0.237,
+   "max": 0.237,
+   "values": [
+    0.237
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_turn_s_p50",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 6.05,
+   "min": 6.05,
+   "max": 6.05,
+   "values": [
+    6.05
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_turn_s_p90",
+   "n_agents": 1,
+   "runs": 1,
+   "median": 6.05,
+   "min": 6.05,
+   "max": 6.05,
+   "values": [
+    6.05
+   ],
+   "source": "idle-goose-1-hblong-tmux-20261115-125005",
+   "hold_s": 300
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 107.45,
+   "min": 107.45,
+   "max": 107.45,
+   "values": [
+    107.45
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_cpu_s_per_agent_hour",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 0.032,
+   "min": 0.032,
+   "max": 0.032,
+   "values": [
+    0.032
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_net_out_kib_per_agent_hour",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "disk_state_mib",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 25.9,
+   "min": 25.9,
+   "max": 25.9,
+   "values": [
+    25.9
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "fleet_agents_per_gib",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 9.53,
+   "min": 9.53,
+   "max": 9.53,
+   "values": [
+    9.53
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "after_work_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 107.04,
+   "min": 107.04,
+   "max": 107.04,
+   "values": [
+    107.04
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "harness_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 106.1,
+   "min": 106.1,
+   "max": 106.1,
+   "values": [
+    106.1
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "terminal_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 1.35,
+   "min": 1.35,
+   "max": 1.35,
+   "values": [
+    1.35
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "tool_children_anon_mib",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 0.0,
+   "min": 0.0,
+   "max": 0.0,
+   "values": [
+    0.0
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "work_peak_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 106.1,
+   "min": 106.1,
+   "max": 106.1,
+   "values": [
+    106.1
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "idle_300s_anon_mib_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 107.45,
+   "min": 107.45,
+   "max": 107.45,
+   "values": [
+    107.45
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900,
+   "comparable": true
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_cpu_s_per_agent",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 0.222,
+   "min": 0.222,
+   "max": 0.222,
+   "values": [
+    0.222
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_turn_s_p50",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 6.2,
+   "min": 6.2,
+   "max": 6.2,
+   "values": [
+    6.2
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_turn_s_p90",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 6.24,
+   "min": 6.24,
+   "max": 6.24,
+   "values": [
+    6.24
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "burst_turn_inflation",
+   "n_agents": 10,
+   "runs": 1,
+   "median": 1.025,
+   "min": 1.025,
+   "max": 1.025,
+   "values": [
+    1.025
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652",
+   "hold_s": 900
+  },
+  {
+   "harness": "goose",
+   "metric": "fleet_max_agents_reached",
+   "n_agents": 200,
+   "runs": 1,
+   "median": 10,
+   "min": 10,
+   "max": 10,
+   "values": [
+    10
+   ],
+   "source": "idle-goose-10-hblong-tmux-20261115-125652"
   }
  ]
 }
