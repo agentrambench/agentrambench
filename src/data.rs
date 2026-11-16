@@ -74,6 +74,7 @@ pub struct Res {
 pub struct Edition {
     pub schema: String,
     pub edition: String,
+    pub frozen: Option<String>,
     #[serde(default)]
     pub bench_commit: String,
     #[serde(default)]

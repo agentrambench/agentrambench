@@ -252,6 +252,8 @@ impl<'a> Site<'a> {
         write!(s, r##"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{t}</title><meta name="description" content="{d}"><link rel="canonical" href="{BASE}{path}"><meta property="og:type" content="website"><meta property="og:site_name" content="AgentRAMBench"><meta property="og:title" content="{t}"><meta property="og:description" content="{d}"><meta property="og:url" content="{BASE}{path}"><meta property="og:image" content="{BASE}/og/{ogname}.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}"><meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{BASE}/og/{ogname}.png">"##, t = esc(&full_title), d = esc(desc)).unwrap();
         if ed.preliminary() {
             s.push_str(r#"<meta name="robots" content="noindex">"#);
+        } else if path == "/" || path == "/data/" || path.starts_with("/editions/") && path.len() > "/editions/".len() {
+            s.push_str(&dataset_ld(ed));
         }
         s.push_str(r##"<meta name="theme-color" content="#ffffff"><script>(function(){var d=document.documentElement,t=null;try{t=localStorage.getItem("theme")}catch(e){}if(t)d.dataset.theme=t;else t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";d.style.colorScheme=t=="light"?"light":"dark";document.querySelector("meta[name=theme-color]").content={light:"#ffffff",grey:"#26282c",dark:"#0b0d10"}[t]||"#ffffff";d.classList.add("js")})()</script>"##);
         s.push_str(r#"<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="preload" href="/fonts/Inter.woff2" as="font" type="font/woff2" crossorigin><style>"#);
@@ -825,6 +827,7 @@ impl<'a> Site<'a> {
         self.write("/sitemap.xml", sm.as_bytes());
         let robots = if ed.preliminary() { "User-agent: *\nDisallow: /\n".to_string() } else { format!("User-agent: *\nAllow: /\nSitemap: {BASE}/sitemap.xml\n") };
         self.write("/robots.txt", robots.as_bytes());
+        self.write("/llms.txt", llms_txt(ed).as_bytes());
         self.write("/_headers", b"/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n/og/*\n  Cache-Control: public, max-age=86400\n/badge/*\n  Cache-Control: public, max-age=3600\n  Access-Control-Allow-Origin: *\n/data/*\n  Access-Control-Allow-Origin: *\n/*\n  X-Content-Type-Options: nosniff\n  Strict-Transport-Security: max-age=31536000; includeSubDomains\n  Referrer-Policy: strict-origin-when-cross-origin\n");
         self.write("/favicon.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0d1117"/><path d="M7 25 L25 7" stroke="#5b8cff" stroke-width="3.5" stroke-linecap="round"/><path d="M4 12 H28" stroke="#f97066" stroke-width="2.5"/></svg>"##);
         for f in ["Inter"] {
@@ -931,4 +934,36 @@ mod tests {
         let f = site().findings(&ed(&ms, &rows("[1,1,1]")));
         assert!(f.contains("0 of 4 harnesses finish the job on their own"), "{f}");
     }
+}
+
+fn json_str(x: &str) -> String {
+    serde_json::to_string(x).unwrap().replace("</", "<\\/")
+}
+
+fn dataset_ld(ed: &Edition) -> String {
+    let names: Vec<&str> = ed.measured().iter().map(|h| h.name.as_str()).collect();
+    let date = ed.frozen.clone().unwrap_or_else(|| ed.edition.clone());
+    format!(
+        r#"<script type="application/ld+json">{{"@context":"https://schema.org","@type":"Dataset","name":{},"description":{},"url":"{BASE}/editions/{id}/","version":"{id}","datePublished":"{date}","temporalCoverage":{},"license":"https://creativecommons.org/licenses/by/4.0/","isAccessibleForFree":true,"creator":{{"@type":"Person","name":"Édouard Vallet"}},"keywords":["coding agents","agent harness","RAM","benchmark"],"variableMeasured":["private RAM per agent","CPU while waiting","fault recovery","crash recovery"],"distribution":[{{"@type":"DataDownload","encodingFormat":"application/json","contentUrl":"{BASE}/data/agentrambench-{id}.json"}},{{"@type":"DataDownload","encodingFormat":"text/csv","contentUrl":"{BASE}/data/agentrambench-{id}.csv"}}]}}</script>"#,
+        json_str(&format!("AgentRAMBench edition {}", ed.id)),
+        json_str(&format!("RAM, CPU, crash and outage results for {}, measured on one Linux desktop with a mock model.", names.join(", "))),
+        json_str(&ed.measured_span().replace(" to ", "/")),
+        id = ed.id,
+    )
+}
+
+fn llms_txt(ed: &Edition) -> String {
+    let mut s = format!(
+        "# AgentRAMBench\n\n> How much memory and CPU coding-agent harnesses ({}) use on one machine, and what happens on crashes and API outages. Edition {} ({}), measured {} with a local mock model.\n\n## Data\n- [Edition JSON]({BASE}/data/agentrambench-{id}.json): every metric, run and value\n- [Edition CSV]({BASE}/data/agentrambench-{id}.csv)\n",
+        ed.measured().iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", "),
+        ed.id,
+        if ed.preliminary() { "preliminary" } else { "final" },
+        ed.measured_span(),
+        id = ed.id,
+    );
+    if let Some(u) = &ed.raw_archive {
+        s.push_str(&format!("- [Raw runs]({u})\n"));
+    }
+    s.push_str(&format!("\n## Pages\n- [Leaderboard]({BASE}/)\n- [Method]({BASE}/method/)\n- [Resources]({BASE}/resources/)\n- [Failures]({BASE}/failures/)\n- [Harnesses]({BASE}/harnesses/)\n\n## Code\n- [Runner]({BENCH})\n- [Site]({REPO})\n"));
+    s
 }
