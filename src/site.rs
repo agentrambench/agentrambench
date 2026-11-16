@@ -828,6 +828,7 @@ impl<'a> Site<'a> {
         let robots = if ed.preliminary() { "User-agent: *\nDisallow: /\n".to_string() } else { format!("User-agent: *\nAllow: /\nSitemap: {BASE}/sitemap.xml\n") };
         self.write("/robots.txt", robots.as_bytes());
         self.write("/llms.txt", llms_txt(ed).as_bytes());
+        self.write("/googlefaebe20812d48d6b.html", b"google-site-verification: googlefaebe20812d48d6b.html");
         self.write("/_headers", b"/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n/og/*\n  Cache-Control: public, max-age=86400\n/badge/*\n  Cache-Control: public, max-age=3600\n  Access-Control-Allow-Origin: *\n/data/*\n  Access-Control-Allow-Origin: *\n/*\n  X-Content-Type-Options: nosniff\n  Strict-Transport-Security: max-age=31536000; includeSubDomains\n  Referrer-Policy: strict-origin-when-cross-origin\n");
         self.write("/favicon.svg", br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0d1117"/><path d="M7 25 L25 7" stroke="#5b8cff" stroke-width="3.5" stroke-linecap="round"/><path d="M4 12 H28" stroke="#f97066" stroke-width="2.5"/></svg>"##);
         for f in ["Inter"] {
