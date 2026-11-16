@@ -19,7 +19,10 @@ pub fn color(ed: &Edition, id: &str, _i: usize) -> String {
         "codex" => 1,
         "opencode" => 2,
         "pi" => 3,
-        _ => 4 + ed.harnesses.iter().position(|h| h.id == id).unwrap_or(0) % 2,
+        "crush" => 4,
+        "goose" => 5,
+        "gemini" => 6,
+        _ => ed.harnesses.iter().position(|h| h.id == id).unwrap_or(0) % 7,
     };
     format!("var(--c{k})")
 }
@@ -436,10 +439,12 @@ impl<'a> Site<'a> {
                 f.push(("Killed mid-command".into(), format!("{alone} of {} harnesses finish the job on their own", k9.len())));
             }
         }
-        for (h, r) in ed.harnesses.iter().filter_map(|h| ed.results.iter().find(|r| r.harness == h.id && r.metric == "fleet_max_agents_reached" && r.stop_reason.as_deref().is_some_and(|x| x.contains("OOM"))).map(|r| (h, r))) {
+        let oom: Vec<(&Harness, &Res)> = ed.harnesses.iter().filter_map(|h| ed.results.iter().find(|r| r.harness == h.id && r.metric == "fleet_max_agents_reached" && r.stop_reason.as_deref().is_some_and(|x| x.contains("OOM"))).map(|r| (h, r))).collect();
+        if let Some((_, r)) = oom.first() {
             let cap = r.stop_reason.as_deref().and_then(|x| x.split("at the ").nth(1)).map(|x| x.trim_end_matches(" cap").replace('G', " GiB")).unwrap_or_default();
             let n = r.stop_reason.as_deref().and_then(|x| x.strip_prefix("N=")).and_then(|x| x.split(':').next()).unwrap_or("");
-            f.insert(1.min(f.len()), ("Ran out of memory".into(), format!("{}: {n} agents overflowed the {cap} limit we set; measured at {}", h.name, ed.result(&h.id, "fleet_max_agents_reached").map(|r| num(r.median)).unwrap_or_default())));
+            let who: Vec<String> = oom.iter().map(|(h, _)| format!("{} ({})", h.name, ed.result(&h.id, "fleet_max_agents_reached").map(|r| num(r.median)).unwrap_or_default())).collect();
+            f.insert(1.min(f.len()), ("Ran out of memory".into(), format!("{n} agents overflowed the {cap} limit we set: {}. Largest fleet measured in brackets", who.join(", "))));
         }
         let mut s = String::from(r#"<aside class="news" aria-label="Key findings">"#);
         for (b, t) in f.iter().take(3) {
@@ -920,7 +925,7 @@ mod tests {
         };
         let f = site().findings(&ed(&ms, &rows("[0,0,0]")));
         assert!(f.contains("Codex CLI 28.4 MiB · opencode 526 MiB"), "{f}");
-        assert!(f.contains("opencode: 50 agents overflowed the 20 GiB limit we set; measured at 25"), "{f}");
+        assert!(f.contains("50 agents overflowed the 20 GiB limit we set: opencode (25)"), "{f}");
         assert!(f.contains("Only Codex CLI did not run the command a second time after restart"), "{f}");
         assert!(f.find("RAM 1 h after work") < f.find("Ran out of memory") && f.find("Ran out of memory") < f.find("Killed mid-command"), "{f}");
         let f = site().findings(&ed(&ms, &rows("[1,1,1]")));

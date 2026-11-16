@@ -118,6 +118,9 @@ fn rows(bs: &[Bar], aria: &str) -> String {
 }
 
 pub fn bars(bs: &[Bar], aria: &str) -> String {
+    if bs.len() > 5 {
+        return rows(bs, aria).replacen(r#"class="rows""#, r#"class="rows all""#, 1);
+    }
     format!("{}{}", columns(bs, aria), rows(bs, aria))
 }
 
