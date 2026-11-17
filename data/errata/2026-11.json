@@ -1,0 +1,4 @@
+[
+ {"harness": "gemini", "metrics": ["fault_truncate_done_alone", "fault_stall-60s_done_alone", "fault_trickle_done_alone", "fault_sse-error_done_alone", "fault_malformed_done_alone"], "date": "2026-11-17", "note": "Withdrawn: Gemini sends a tool call as one stream event and these faults fire at the third event, so the fault was never delivered. Gemini's fault total now counts the other 9 faults. Fixed in edition 2026-12."},
+ {"harness": "codex", "metrics": ["harness_anon_mib_per_agent", "tool_children_anon_mib"], "date": "2026-11-17", "note": "Withdrawn: a helper program Codex CLI unpacks in its home folder was counted as a launched command instead of as Codex itself. Codex's total RAM figures are unaffected. Fixed in edition 2026-12."}
+]

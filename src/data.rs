@@ -23,6 +23,14 @@ pub struct Reproduce {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct Erratum {
+    pub harness: String,
+    pub metrics: Vec<String>,
+    pub date: String,
+    pub note: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Harness {
     pub id: String,
     pub name: String,
@@ -93,6 +101,8 @@ pub struct Edition {
     pub id: String,
     #[serde(skip)]
     pub raw: String,
+    #[serde(skip)]
+    pub errata: Vec<Erratum>,
 }
 
 impl Metric {
@@ -114,7 +124,18 @@ impl Edition {
         }
         e.id = path.file_stem().unwrap().to_string_lossy().into_owned();
         e.raw = raw;
+        let ep = path.parent().and_then(|d| d.parent()).map(|d| d.join("errata").join(format!("{}.json", e.id)));
+        if let Some(ep) = ep.filter(|p| p.exists()) {
+            let txt = std::fs::read_to_string(&ep).map_err(|x| format!("{}: {x}", ep.display()))?;
+            e.errata = serde_json::from_str(&txt).map_err(|x| format!("{}: {x}", ep.display()))?;
+            let er = e.errata.clone();
+            e.results.retain(|r| !er.iter().any(|x| x.harness == r.harness && x.metrics.contains(&r.metric)));
+        }
         Ok(e)
+    }
+
+    pub fn erratum(&self, harness: &str, metric: &str) -> Option<&Erratum> {
+        self.errata.iter().find(|x| x.harness == harness && x.metrics.iter().any(|m| m == metric))
     }
 
     pub fn preliminary(&self) -> bool {
@@ -419,6 +440,26 @@ pub mod tests {
         assert_eq!(k, vec![(1, "pi"), (2, "codex")]);
         let e = ed(&m("task_net_out_kib", "lower"), &rs.join(","));
         assert_eq!(e.ranking("task_net_out_kib")[1].0, 1, "non-governance metrics still rank on median");
+    }
+
+    #[test]
+    fn errata_withdraw_rows_and_fault_totals() {
+        // harness-bench 17/11: gemini truncate faults never delivered in 2026-11, scored 1.0
+        let d = std::env::temp_dir().join(format!("arb-err-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("editions")).unwrap();
+        std::fs::create_dir_all(d.join("errata")).unwrap();
+        let rs = [r("gemini", "fault_truncate_done_alone", 1, None, 1.0, r#","values":[1,1]"#), r("gemini", "fault_429x3_done_alone", 1, None, 1.0, r#","values":[1,0]"#)];
+        let j = format!(r#"{{"schema":"agentrambench/1","edition":"2026-11","harnesses":[{{"id":"gemini","name":"Gemini CLI","status":"measured"}}],"metrics":[{},{}],"results":[{}]}}"#, m("fault_truncate_done_alone", "higher"), m("fault_429x3_done_alone", "higher"), rs.join(","));
+        std::fs::write(d.join("editions/2026-11.json"), &j).unwrap();
+        let e = Edition::load(&d.join("editions/2026-11.json")).unwrap();
+        assert_eq!(e.fault_tally("gemini"), Some((3.0, 4)));
+        std::fs::write(d.join("errata/2026-11.json"), r#"[{"harness":"gemini","metrics":["fault_truncate_done_alone"],"date":"2026-11-17","note":"n"}]"#).unwrap();
+        let e = Edition::load(&d.join("editions/2026-11.json")).unwrap();
+        assert_eq!(e.fault_tally("gemini"), Some((1.0, 2)));
+        assert!(e.result("gemini", "fault_truncate_done_alone").is_none());
+        assert!(e.erratum("gemini", "fault_truncate_done_alone").is_some());
+        assert!(e.erratum("gemini", "fault_429x3_done_alone").is_none());
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

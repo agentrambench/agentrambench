@@ -324,12 +324,13 @@ impl<'a> Site<'a> {
                 b.note = if b.note.is_empty() { "provisional".into() } else { format!("{} · provisional", b.note) };
             }
         }
-        let missing: Vec<String> = ed.measured().iter().filter(|h| !bs.iter().any(|b| b.name == h.name)).map(|h| h.name.clone()).collect();
+        let missing: Vec<String> = ed.measured().iter().filter(|h| !bs.iter().any(|b| b.name == h.name) && ed.erratum(&h.id, mid).is_none()).map(|h| h.name.clone()).collect();
+        let withdrawn: Vec<String> = ed.measured().iter().filter(|h| if mid == "faults" { ed.errata.iter().any(|x| x.harness == h.id && x.metrics.iter().any(|m| m.starts_with("fault_"))) } else { ed.erratum(&h.id, mid).is_some() }).map(|h| if mid == "faults" { format!("{} (fewer faults counted)", h.name) } else { h.name.clone() }).collect();
         src.sort();
         src.dedup();
         let link = if link.is_empty() { format!(r#"<details class="raw"><summary>Raw runs</summary><span class="mono">{}</span></details>"#, esc(&src.join(", "))) } else { format!(r#"<a href="{link}">Details →</a>"#) };
         let mut s = String::new();
-        write!(s, r#"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · {}</p>{}<div class="foot"><span>{}</span>{}</div></section>"#, esc(mid), esc(title), esc(&sub), better, chart::bars(&bs, &format!("{title}: {}", bs.iter().map(|b| format!("{} {}", b.name, b.label)).collect::<Vec<_>>().join(", "))), if missing.is_empty() { if let (true, Some(n)) = (mid.starts_with("burst_"), ed.common_n(mid)) { format!("{n} agents at once, same for all") } else if let Some(st) = ed.common_steps(mid) { format!("Same work for all: {st} file reads, then reopened; history size differs (under bars){}", if bs.iter().any(|b| b.note.ends_with(" *")) { ". * compacted itself and stopped before the end" } else { "" }) } else if bs.iter().any(|b| b.note.ends_with(" open")) { "Different numbers of agents: compare with care".to_string() } else if let (true, Some((n, Some(h)))) = (mid.starts_with("idle_") || mid.starts_with("fleet_agents") || mid == "disk_state_mib", ed.ranking(mid).first().map(|x| (x.2.n_agents, x.2.hold_s))) { format!("{n} agents open for {}, same for all", if h >= 3600.0 { format!("{:.0} h", h / 3600.0) } else { format!("{:.0} min", h / 60.0) }) } else { if mid == "faults" || ed.metric(mid).is_some_and(|m| m.unit == "rate") { "Count out of all runs".to_string() } else { "Middle of repeated runs; thin line: lowest–highest".to_string() } } } else { format!("Not run yet: {}", esc(&missing.join(", "))) }, link).unwrap();
+        write!(s, r#"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · {}</p>{}<div class="foot"><span>{}</span>{}</div></section>"#, esc(mid), esc(title), esc(&sub), better, chart::bars(&bs, &format!("{title}: {}", bs.iter().map(|b| format!("{} {}", b.name, b.label)).collect::<Vec<_>>().join(", "))), if missing.is_empty() { if let (true, Some(n)) = (mid.starts_with("burst_"), ed.common_n(mid)) { format!("{n} agents at once, same for all") } else if let Some(st) = ed.common_steps(mid) { format!("Same work for all: {st} file reads, then reopened; history size differs (under bars){}", if bs.iter().any(|b| b.note.ends_with(" *")) { ". * compacted itself and stopped before the end" } else { "" }) } else if bs.iter().any(|b| b.note.ends_with(" open")) { "Different numbers of agents: compare with care".to_string() } else if let (true, Some((n, Some(h)))) = (mid.starts_with("idle_") || mid.starts_with("fleet_agents") || mid == "disk_state_mib", ed.ranking(mid).first().map(|x| (x.2.n_agents, x.2.hold_s))) { format!("{n} agents open for {}, same for all", if h >= 3600.0 { format!("{:.0} h", h / 3600.0) } else { format!("{:.0} min", h / 60.0) }) } else { if mid == "faults" || ed.metric(mid).is_some_and(|m| m.unit == "rate") { "Count out of all runs".to_string() } else { "Middle of repeated runs; thin line: lowest–highest".to_string() } } } else { format!("Not run yet: {}", esc(&missing.join(", "))) } + &if withdrawn.is_empty() { String::new() } else { format!(r#" · Withdrawn: {} (<a href="/editions/{}/#corrections">correction</a>)"#, esc(&withdrawn.join(", ")), esc(&ed.id)) }, link).unwrap();
         Some(s)
     }
 
@@ -586,6 +587,7 @@ impl<'a> Site<'a> {
             for h in &hs {
                 match (ed.metric(&id), ed.result(&h.id, &id)) {
                     (Some(m), Some(r)) => write!(s, r#"<td class="mono">{} {}</td>"#, pips(m, r), esc(&val(m, r))).unwrap(),
+                    _ if ed.erratum(&h.id, &id).is_some() => write!(s, r#"<td class="pend"><a href="/editions/{}/#corrections" title="withdrawn, see correction">withdrawn</a></td>"#, esc(&ed.id)).unwrap(),
                     _ => s.push_str(r#"<td class="pend">–</td>"#),
                 }
             }
@@ -797,6 +799,14 @@ impl<'a> Site<'a> {
             write!(b, r#"<div class="wrap"><section class="hero solo"><div><p class="eyebrow"><a href="/editions/">Editions</a> · {}</p><h1>Edition {}</h1><p class="lede">Measured {} on {} with bench <code>{}</code>. <a href="/data/agentrambench-{}.json">JSON</a>.</p></div></section>"#, if e.preliminary() { "preliminary" } else { "final" }, esc(&e.id), esc(&e.measured_span()), esc(&e.machine.cpu), esc(&e.bench_commit), esc(&e.id)).unwrap();
             b.push_str("<h2>Leaderboard</h2>");
             b.push_str(&self.scoreboard(e, ""));
+            if !e.errata.is_empty() {
+                b.push_str(r#"<h2 id="corrections">Corrections</h2><p class="mut">Found after this edition was frozen. The published JSON is unchanged; the site no longer shows the withdrawn values.</p><ul>"#);
+                for x in &e.errata {
+                    let hn = e.harnesses.iter().find(|h| h.id == x.harness).map(|h| h.name.as_str()).unwrap_or(&x.harness);
+                    write!(b, r#"<li><b>{}</b>, {}: {} <span class="mut">({})</span></li>"#, esc(hn), esc(&x.metrics.iter().map(|m| short(m, e.metric(m))).collect::<Vec<_>>().join(", ")), esc(&x.note), esc(&x.date)).unwrap();
+                }
+                b.push_str("</ul>");
+            }
             b.push_str("</div>");
             let og = Og { kicker: String::new(), title: format!("Edition {}", e.id), sub: "Fleet cost of coding-agent harnesses.".into(), stat: None, bars: og_bars(e), prelim: e.preliminary() };
             self.page(&format!("/editions/{}/", e.id), &format!("Edition {}", e.id), &format!("Edition {}: RAM, CPU, crash and outage results for {}, measured {}.", e.id, e.measured().iter().map(|h| h.name.as_str()).collect::<Vec<_>>().join(", "), e.measured_span()), og, &b);
