@@ -23,6 +23,12 @@ pub struct Reproduce {
 }
 
 #[derive(Deserialize, Clone)]
+pub struct Gap {
+    pub metrics: Vec<String>,
+    pub reason: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Erratum {
     pub harness: String,
     pub metrics: Vec<String>,
@@ -105,6 +111,10 @@ pub struct Edition {
     pub errata: Vec<Erratum>,
     #[serde(default)]
     pub fault_na: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub withheld: BTreeMap<String, Gap>,
+    #[serde(default)]
+    pub not_measured: BTreeMap<String, BTreeMap<String, Gap>>,
 }
 
 impl Metric {
@@ -138,6 +148,12 @@ impl Edition {
 
     pub fn erratum(&self, harness: &str, metric: &str) -> Option<&Erratum> {
         self.errata.iter().find(|x| x.harness == harness && x.metrics.iter().any(|m| m == metric))
+    }
+
+    pub fn gap(&self, harness: &str, metric: &str) -> Option<&str> {
+        let has = |g: &Gap| g.metrics.iter().any(|m| m == metric);
+        self.withheld.get(harness).filter(|g| has(g)).map(|g| g.reason.as_str())
+            .or_else(|| self.not_measured.get(harness).and_then(|m| m.values().find(|g| has(g))).map(|g| g.reason.as_str()))
     }
 
     pub fn preliminary(&self) -> bool {
@@ -478,6 +494,18 @@ pub mod tests {
         assert!(e.erratum("gemini", "fault_truncate_done_alone").is_some());
         assert!(e.erratum("gemini", "fault_429x3_done_alone").is_none());
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn withheld_and_not_measured_give_reasons() {
+        // 2026-12 export: codex role split withheld, opencode marathon stopped at turn 234
+        let mut e = ed(&m("marathon_idle_anon_mib", "lower"), &r("pi", "marathon_idle_anon_mib", 1, None, 134.0, ""));
+        e.withheld.insert("codex".into(), Gap { metrics: vec!["tool_children_anon_mib".into()], reason: "role split withdrawn".into() });
+        e.not_measured.insert("opencode".into(), [("marathon".to_string(), Gap { metrics: vec!["marathon_idle_anon_mib".into()], reason: "stopped after auto-compaction at turn 234".into() })].into_iter().collect());
+        assert_eq!(e.gap("codex", "tool_children_anon_mib"), Some("role split withdrawn"));
+        assert_eq!(e.gap("opencode", "marathon_idle_anon_mib"), Some("stopped after auto-compaction at turn 234"));
+        assert_eq!(e.gap("opencode", "marathon_peak_anon_mib"), None);
+        assert_eq!(e.gap("pi", "marathon_idle_anon_mib"), None);
     }
 
     #[test]
