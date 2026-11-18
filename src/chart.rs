@@ -90,7 +90,7 @@ fn rows(bs: &[Bar], aria: &str) -> String {
     let w = 320.0;
     let name_w = bs.iter().map(|x| text_px(&x.name, NAME_PX)).fold(60.0, f64::max).min(104.0);
     let x0 = name_w + 8.0;
-    let label_w = bs.iter().map(|x| text_px(&x.label, 7.6)).fold(0.0, f64::max) + 6.0;
+    let label_w = bs.iter().map(|x| text_px(&x.label, 8.6)).fold(0.0, f64::max) + 10.0;
     let bar_w = w - x0 - label_w;
     let notes: Vec<Vec<String>> = bs.iter().map(|x| if !x.note.is_empty() && text_px(&x.note, NOTE_PX) <= w - x0 { vec![x.note.clone()] } else { wrap(&x.note, w - x0, NOTE_PX) }).collect();
     let names: Vec<Vec<String>> = bs.iter().map(|x| wrap(&x.name, name_w, NAME_PX)).collect();

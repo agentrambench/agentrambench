@@ -52,7 +52,7 @@ fn unit(m: &Metric) -> &str {
 
 pub fn val(m: &Metric, r: &Res) -> String {
     if m.unit == "rate" {
-        if is_binary(r) {
+        if is_binary(r) && r.values.len() > 1 {
             let k: f64 = r.values.iter().sum();
             return format!("{}/{}", k as u32, r.values.len());
         }
@@ -113,6 +113,19 @@ fn pips(m: &Metric, r: &Res) -> String {
 
 pub fn plain(id: &str) -> Option<(&'static str, &'static str)> {
     Some(match id {
+        "burst_peak_anon_mib_per_agent" => ("RAM with all agents working at once", "Every agent gets the same 15-step task at the same second. Peak memory per agent while they all work, terminal and launched commands included. MiB."),
+        "burst_after_anon_mib_per_agent" => ("RAM 1 min after all worked at once", "Same agents, one minute after the shared task. MiB."),
+        "burst_peak_harness_anon_mib_per_agent" => ("RAM while all work, agent alone", "Peak memory of the agent itself while all work at once, without terminal or launched commands. MiB."),
+        "burst_peak_tool_anon_mib_per_agent" => ("RAM of launched commands while all work", "Peak memory of the commands each agent runs, while all work at once. MiB."),
+        "burst_peak_terminal_anon_mib_per_agent" => ("RAM of the terminal while all work", "Share of the terminal window per agent while all work at once (tmux). MiB."),
+        "burst_work_cpu_s_per_agent" => ("CPU when all work at once", "CPU seconds each agent uses for the shared 15-step task, all agents at once (night runs)."),
+        "burst_work_turn_s_p50" => ("Task time when all work at once", "Typical time to finish the 15-step task while every other agent works too. Seconds."),
+        "burst_work_turn_s_p90" => ("Slowest task times when all work at once", "Time the slowest 1 in 10 agents needed. Seconds."),
+        "burst_work_turn_inflation" => ("Slowdown when all work at once", "Task time with every agent busy, divided by task time alone. 1.0 = no slowdown."),
+        "burst_max_agents_reached" => ("Most agents working at once", "Largest number of agents that all finished the shared task together. We tried up to 50."),
+        "headless_exit_honest" => ("Honest exit when it gives up", "When an unattended agent did not finish a task, did it exit with an error instead of reporting success? Share of runs."),
+        "crash_sigterm_clean_exit" => ("Stopped cleanly: exits in time", "Sent a stop signal (SIGTERM) mid-task: did it exit within 10 s?"),
+        "crash_sigterm_turn_saved" => ("Stopped cleanly: work saved", "After the stop signal and a restart, is the interrupted step still in the session?"),
         "marathon_idle_anon_mib" => ("RAM after a long session", "One agent after 300 tool calls (about 1M tokens of history), then 5 min waiting. MiB."),
         "marathon_peak_anon_mib" => ("Peak RAM during a long session", "Highest memory while doing those 300 tool calls. MiB."),
         "after_work_anon_mib_per_agent" => ("RAM right after working", "Each agent just finished a task (20 file reads, a written report), 50 agents running. MiB."),
@@ -172,6 +185,35 @@ pub fn fault_plain(p: &str) -> Option<&'static str> {
         "tool-hang" => "A command never finishes",
         "tool-huge" => "A command prints a huge output",
         "loop-3min" => "Model never stops talking (3 min, not in totals)",
+        "429-5min-noRA" => "Rate limited for 5 min, no retry hint",
+        "429-RA3600" => "Told to retry in an hour (not in totals)",
+        "503-5min" => "Provider down for 5 min",
+        "503-15min" => "Provider down for 15 min",
+        "529-5min" => "Provider overloaded for 5 min",
+        "auth-5min" => "API key rejected for 5 min",
+        "413" => "Request too large",
+        "overflow" => "Conversation too long for the model",
+        "html200" => "Proxy error page instead of an answer",
+        "empty200" => "Empty answer",
+        "dup-events" => "Parts of the answer sent twice",
+        "reorder" => "Parts of the answer out of order",
+        "flap-3min" => "Network cut every 20 s for 3 min",
+        "stall-5min" => "Answer freezes for 5 min",
+        "truncate-tool" => "Cut off while writing a tool call",
+        "max-tokens-tool" => "Length limit hit inside a tool call",
+        "bad-tool-call" => "Model writes a broken tool call",
+        "unknown-tool" => "Model calls a tool that does not exist",
+        "compound" => "Three faults in one task",
+        "enospc-session" => "Disk full where the agent saves its session",
+        "enospc-tool" => "Disk full when a command writes",
+        "tool-flood" => "A command floods the screen",
+        "quota-429" => "Quota used up (not a short limit)",
+        "refusal-200" => "Model refuses, request looks successful",
+        "keepalive-stall" => "Connection alive but no progress for 5 min",
+        "quiet-stream" => "Healthy answer, silent for 90 s",
+        "utf8" => "Broken characters in a command's output",
+        "pipe-hold" => "A command leaves a process running",
+        "index-lock" => "Git lock file left by an earlier crash",
         _ => return None,
     })
 }
@@ -180,7 +222,7 @@ pub fn short(id: &str, m: Option<&Metric>) -> String {
     if let Some((t, _)) = plain(id) {
         return t.to_string();
     }
-    let crash = |c: &str| match c { "kill9" => "Crash during a command", "scope" => "Everything killed", "term" => "Terminal closed", "stream" => "Crash mid-answer", _ => "Crash" };
+    let crash = |c: &str| match c { "sigterm" => "Stopped cleanly", "kill9" => "Crash during a command", "scope" => "Everything killed", "term" => "Terminal closed", "stream" => "Crash mid-answer", _ => "Crash" };
     if let Some(c) = id.strip_prefix("crash_").and_then(|x| x.strip_suffix("_recovered_alone")) {
         return format!("{}: finished alone", crash(c));
     }
@@ -285,7 +327,7 @@ impl<'a> Site<'a> {
         let (sub, better);
         let mut src: Vec<String> = vec![];
         if mid == "faults" {
-            let mut v: Vec<chart::Bar> = ed.measured().iter().filter_map(|h| ed.fault_tally(&h.id).map(|(k, n)| chart::Bar { name: h.name.clone(), color: color(ed, &h.id, 0), v: k / n as f64 * 100.0, lo: 0.0, hi: 0.0, label: format!("{}/{}", k as u32, n), note: String::new() })).collect();
+            let mut v: Vec<chart::Bar> = ed.measured().iter().filter_map(|h| ed.fault_tally(&h.id).map(|(k, n)| chart::Bar { name: h.name.clone(), color: color(ed, &h.id, 0), v: k / n as f64 * 100.0, lo: 0.0, hi: 0.0, label: tally(k, n), note: String::new() })).collect();
             if v.is_empty() {
                 return None;
             }
@@ -330,7 +372,7 @@ impl<'a> Site<'a> {
         src.dedup();
         let link = if link.is_empty() { format!(r#"<details class="raw"><summary>Raw runs</summary><span class="mono">{}</span></details>"#, esc(&src.join(", "))) } else { format!(r#"<a href="{link}">Details →</a>"#) };
         let mut s = String::new();
-        write!(s, r#"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · {}</p>{}<div class="foot"><span>{}</span>{}</div></section>"#, esc(mid), esc(title), esc(&sub), better, chart::bars(&bs, &format!("{title}: {}", bs.iter().map(|b| format!("{} {}", b.name, b.label)).collect::<Vec<_>>().join(", "))), if missing.is_empty() { if let (true, Some(n)) = (mid.starts_with("burst_"), ed.common_n(mid)) { format!("{n} agents at once, same for all") } else if let Some(st) = ed.common_steps(mid) { format!("Same work for all: {st} file reads, then reopened; history size differs (under bars){}", if bs.iter().any(|b| b.note.ends_with(" *")) { ". * compacted itself and stopped before the end" } else { "" }) } else if bs.iter().any(|b| b.note.ends_with(" open")) { "Different numbers of agents: compare with care".to_string() } else if let (true, Some((n, Some(h)))) = (mid.starts_with("idle_") || mid.starts_with("fleet_agents") || mid == "disk_state_mib", ed.ranking(mid).first().map(|x| (x.2.n_agents, x.2.hold_s))) { format!("{n} agents open for {}, same for all", if h >= 3600.0 { format!("{:.0} h", h / 3600.0) } else { format!("{:.0} min", h / 60.0) }) } else { if mid == "faults" || ed.metric(mid).is_some_and(|m| m.unit == "rate") { "Count out of all runs".to_string() } else { "Middle of repeated runs; thin line: lowest–highest".to_string() } } } else { format!("Not run yet: {}", esc(&missing.join(", "))) } + &if withdrawn.is_empty() { String::new() } else { format!(r#" · Withdrawn: {} (<a href="/editions/{}/#corrections">correction</a>)"#, esc(&withdrawn.join(", ")), esc(&ed.id)) }, link).unwrap();
+        write!(s, r#"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · {}</p>{}<div class="foot"><span>{}</span>{}</div></section>"#, esc(mid), esc(title), esc(&sub), better, chart::bars(&bs, &format!("{title}: {}", bs.iter().map(|b| format!("{} {}", b.name, b.label)).collect::<Vec<_>>().join(", "))), if missing.is_empty() { if let (true, Some(n)) = (mid.starts_with("burst_"), ed.common_n(mid)) { format!("{n} agents at once, same for all") } else if let Some(st) = ed.common_steps(mid) { format!("Same work for all: {st} file reads, then reopened; history size differs (under bars){}", if bs.iter().any(|b| b.note.ends_with(" *")) { ". * compacted itself and stopped before the end" } else { "" }) } else if bs.iter().any(|b| b.note.ends_with(" open")) { "Different numbers of agents: compare with care".to_string() } else if let (true, Some((n, Some(h)))) = (mid.starts_with("idle_") || mid.starts_with("fleet_agents") || mid == "disk_state_mib", ed.ranking(mid).first().map(|x| (x.2.n_agents, x.2.hold_s))) { format!("{n} agents open for {}, same for all", if h >= 3600.0 { format!("{:.0} h", h / 3600.0) } else { format!("{:.0} min", h / 60.0) }) } else { if mid == "faults" && ed.graded() { "Per fault: 1 = finished alone, 0.6 = after one “continue”, less for repeated actions or wasted requests".to_string() } else if mid == "faults" || ed.metric(mid).is_some_and(|m| m.unit == "rate") { "Count out of all runs".to_string() } else { "Middle of repeated runs; thin line: lowest–highest".to_string() } } } else { format!("Not run yet: {}", esc(&missing.join(", "))) } + &if withdrawn.is_empty() { String::new() } else { format!(r#" · Withdrawn: {} (<a href="/editions/{}/#corrections">correction</a>)"#, esc(&withdrawn.join(", ")), esc(&ed.id)) }, link).unwrap();
         Some(s)
     }
 
@@ -347,6 +389,7 @@ impl<'a> Site<'a> {
         }
         if mid == "faults" {
             return match ed.fault_tally(&h.id) {
+                Some((k, n)) if ed.graded() => format!(r#"<td class="n"><span class="v">{}</span><span class="sp"> of {n} faults</span></td>"#, tally(k, n)),
                 Some((k, n)) => format!(r#"<td class="n"><span class="v">{}/{}</span><span class="sp"> of {} runs</span></td>"#, k as u32, n, n),
                 None => r#"<td class="n pend" title="not run in this edition">pending</td>"#.into(),
             };
@@ -420,7 +463,7 @@ impl<'a> Site<'a> {
 
     fn findings(&self, ed: &Edition) -> String {
         let mut f: Vec<(String, String)> = Vec::new();
-        let (mid, lab) = if ed.ranking("idle_3600s_anon_mib_per_agent").len() >= 2 { ("idle_3600s_anon_mib_per_agent", "RAM 1 h after work") } else if ed.ranking("marathon_idle_anon_mib").len() >= 2 { ("marathon_idle_anon_mib", "RAM after a long session") } else { ("idle_anon_mib_per_agent", "RAM at fresh start") };
+        let (mid, lab) = if ed.ranking("burst_peak_anon_mib_per_agent").len() >= 2 { ("burst_peak_anon_mib_per_agent", "RAM with all agents working at once") } else if ed.ranking("idle_3600s_anon_mib_per_agent").len() >= 2 { ("idle_3600s_anon_mib_per_agent", "RAM 1 h after work") } else if ed.ranking("marathon_idle_anon_mib").len() >= 2 { ("marathon_idle_anon_mib", "RAM after a long session") } else { ("idle_anon_mib_per_agent", "RAM at fresh start") };
         let fd = ed.ranking(mid);
         if fd.len() >= 2 {
             let (b, w) = (fd.first().unwrap(), fd.last().unwrap());
@@ -490,12 +533,11 @@ impl<'a> Site<'a> {
         b.push_str(&Self::pills("/"));
         b.push_str(r#"<div class="grid">"#);
         let cards = [
-            ("idle_3600s_anon_mib_per_agent", "/resources/#idle_3600s_anon_mib_per_agent"),
+            ("burst_peak_anon_mib_per_agent", "/resources/#burst_peak_anon_mib_per_agent"),
             ("marathon_idle_anon_mib", "/resources/#marathon_idle_anon_mib"),
-            ("marathon_peak_anon_mib", "/resources/#marathon_peak_anon_mib"),
-            ("resumed_after_turn_anon_mib_per_agent", "/resources/#resumed_after_turn_anon_mib_per_agent"),
-            ("idle_cpu_s_per_agent_hour", "/resources/#idle_cpu_s_per_agent_hour"),
             ("faults", "/failures/#faults"),
+            ("idle_cpu_s_per_agent_hour", "/resources/#idle_cpu_s_per_agent_hour"),
+            ("headless_exit_honest", "/failures/#headless_exit_honest"),
             ("crash_kill9_recovered_alone", "/failures/#crash"),
             ("crash_kill9_double_execution", "/failures/#crash"),
             ("first_request_kib", "/tokens/"),
@@ -537,6 +579,7 @@ impl<'a> Site<'a> {
             ("scope", "Everything killed", "The agent and its command are killed together, as when the machine runs out of memory or a container stops."),
             ("term", "Terminal closed", "The terminal holding the agent is closed."),
             ("stream", "Crash mid-answer", "The agent is force-killed while the model's answer is arriving."),
+            ("sigterm", "Stopped cleanly", "The agent gets a normal stop signal (SIGTERM) during a command, then is restarted."),
         ];
         let modes: Vec<_> = modes.into_iter().filter(|m| ed.has_data(&format!("crash_{}_recovered_alone", m.0))).collect();
         if modes.is_empty() {
@@ -570,7 +613,8 @@ impl<'a> Site<'a> {
     }
 
     fn fault_matrix(&self, ed: &Edition) -> String {
-        let profs: Vec<String> = ed.metrics.iter().filter_map(|m| m.id.strip_prefix("fault_").and_then(|x| x.strip_suffix("_done_alone")).map(String::from)).filter(|p| ed.has_data(&format!("fault_{p}_done_alone"))).collect();
+        let sfx = ed.fault_suffix();
+        let profs: Vec<String> = ed.metrics.iter().filter_map(|m| m.id.strip_prefix("fault_").and_then(|x| x.strip_suffix(sfx)).map(String::from)).filter(|p| ed.has_data(&format!("fault_{p}{sfx}"))).collect();
         if profs.is_empty() {
             return r#"<p class="pend">No fault run on the ranked harnesses in this edition yet.</p>"#.into();
         }
@@ -581,12 +625,14 @@ impl<'a> Site<'a> {
         }
         s.push_str("</tr></thead><tbody>");
         for p in &profs {
-            let id = format!("fault_{p}_done_alone");
+            let id = format!("fault_{p}{sfx}");
             let lab = ed.fault_labels.get(p).cloned().unwrap_or(p.clone());
             write!(s, r#"<tr><th scope="row" class="sticky">{}<span class="ver">{}</span></th>"#, esc(fault_plain(p).unwrap_or(&lab)), esc(&lab)).unwrap();
             for h in &hs {
                 match (ed.metric(&id), ed.result(&h.id, &id)) {
+                    (Some(_), Some(r)) if ed.graded() => write!(s, r#"<td class="mono grade g{}">{:.1}</td>"#, (r.median * 10.0).round() as u32, r.median).unwrap(),
                     (Some(m), Some(r)) => write!(s, r#"<td class="mono">{} {}</td>"#, pips(m, r), esc(&val(m, r))).unwrap(),
+                    _ if ed.fault_na(&h.id, p) => s.push_str(r#"<td class="pend" title="cannot happen with this harness's API">n/a</td>"#),
                     _ if ed.erratum(&h.id, &id).is_some() => write!(s, r#"<td class="pend"><a href="/editions/{}/#corrections" title="withdrawn, see correction">withdrawn</a></td>"#, esc(&ed.id)).unwrap(),
                     _ => s.push_str(r#"<td class="pend">–</td>"#),
                 }
@@ -596,7 +642,7 @@ impl<'a> Site<'a> {
         s.push_str(r#"<tr><th scope="row" class="sticky">Total handled alone</th>"#);
         for h in &hs {
             match ed.fault_tally(&h.id) {
-                Some((k, n)) => write!(s, r#"<td class="mono"><b>{}/{}</b></td>"#, k as u32, n).unwrap(),
+                Some((k, n)) => write!(s, r#"<td class="mono"><b>{}</b></td>"#, tally(k, n)).unwrap(),
                 None => s.push_str(r#"<td class="pend">–</td>"#),
             }
         }
@@ -851,7 +897,7 @@ impl<'a> Site<'a> {
 
 fn primary(ed: &Edition) -> &'static str {
     let n = ed.measured().len();
-    ["idle_3600s_anon_mib_per_agent", "idle_anon_mib_per_agent", "task_anon_mib"].into_iter().find(|m| ed.ranking(m).len() * 2 > n).unwrap_or("task_anon_mib")
+    ["burst_peak_anon_mib_per_agent", "idle_3600s_anon_mib_per_agent", "idle_anon_mib_per_agent", "task_anon_mib"].into_iter().find(|m| ed.ranking(m).len() * 2 > n).unwrap_or("task_anon_mib")
 }
 
 fn short_ver(h: &Harness) -> String {
@@ -978,4 +1024,8 @@ fn llms_txt(ed: &Edition) -> String {
     }
     s.push_str(&format!("\n## Pages\n- [Leaderboard]({BASE}/)\n- [Method]({BASE}/method/)\n- [Resources]({BASE}/resources/)\n- [Failures]({BASE}/failures/)\n- [Harnesses]({BASE}/harnesses/)\n\n## Code\n- [Runner]({BENCH})\n- [Site]({REPO})\n"));
     s
+}
+
+fn tally(k: f64, n: usize) -> String {
+    if k.fract() == 0.0 { format!("{}/{n}", k as u32) } else { format!("{k:.1}/{n}") }
 }

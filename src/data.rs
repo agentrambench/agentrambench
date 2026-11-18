@@ -103,6 +103,8 @@ pub struct Edition {
     pub raw: String,
     #[serde(skip)]
     pub errata: Vec<Erratum>,
+    #[serde(default)]
+    pub fault_na: BTreeMap<String, Vec<String>>,
 }
 
 impl Metric {
@@ -222,14 +224,30 @@ impl Edition {
         out
     }
 
+    pub fn graded(&self) -> bool {
+        self.results.iter().any(|r| r.metric.starts_with("fault_") && r.metric.ends_with("_score"))
+    }
+
+    pub fn fault_suffix(&self) -> &'static str {
+        if self.graded() { "_score" } else { "_done_alone" }
+    }
+
+    pub fn fault_na(&self, harness: &str, profile: &str) -> bool {
+        self.fault_na.get(harness).is_some_and(|v| v.iter().any(|p| p == profile))
+    }
+
     pub fn fault_tally(&self, harness: &str) -> Option<(f64, usize)> {
+        let sfx = self.fault_suffix();
         let rs: Vec<&Res> = self
             .results
             .iter()
-            .filter(|r| r.harness == harness && r.metric.starts_with("fault_") && r.metric.ends_with("_done_alone") && self.metric(&r.metric).and_then(|m| m.in_totals) != Some(false))
+            .filter(|r| r.harness == harness && r.metric.starts_with("fault_") && r.metric.ends_with(sfx) && self.metric(&r.metric).and_then(|m| m.in_totals) != Some(false))
             .collect();
         if rs.is_empty() {
             return None;
+        }
+        if self.graded() {
+            return Some((rs.iter().map(|r| r.median).sum(), rs.len()));
         }
         Some((rs.iter().flat_map(|r| r.values.iter()).sum(), rs.iter().map(|r| r.values.len()).sum()))
     }

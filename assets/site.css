@@ -142,3 +142,4 @@ footer p{margin:0}
 .prov{font-size:11px;font-weight:600;color:var(--warn,#b7791f);border:1px solid currentColor;border-radius:4px;padding:0 4px;margin-left:4px;vertical-align:1px}
 svg.rows{display:none}@media (max-width:700px){svg.cols{display:none}svg.rows{display:block}}
 svg.rows.all{display:block}
+.grade.g10{color:var(--mute)}.grade.g0,.grade.g1,.grade.g2,.grade.g3,.grade.g4{font-weight:700;text-decoration:underline;text-underline-offset:3px}
