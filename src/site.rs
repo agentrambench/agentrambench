@@ -332,6 +332,11 @@ impl<'a> Site<'a> {
                 return None;
             }
             v.sort_by(|a, b| b.v.partial_cmp(&a.v).unwrap());
+            for h in ed.self_runs() {
+                if let Some((k, n)) = ed.fault_tally(&h.id) {
+                    v.push(chart::Bar { name: h.name.clone(), color: "var(--faint)".to_string(), v: k / n as f64 * 100.0, lo: 0.0, hi: 0.0, label: tally(k, n), note: "self-run · not ranked".into() });
+                }
+            }
             bs = v;
             sub = plain("faults").unwrap().1.to_string();
             better = "Higher is better";
@@ -353,6 +358,11 @@ impl<'a> Site<'a> {
             if ed.common_steps(mid).is_none() && ns.iter().any(|n| *n != ns[0]) {
                 for (b, x) in bs2.iter_mut().zip(rk.iter()) {
                     b.note = format!("{} open", x.2.n_agents);
+                }
+            }
+            for h in ed.self_runs() {
+                if let Some(r) = ed.result(&h.id, mid) {
+                    bs2.push(chart::Bar { name: h.name.clone(), color: "var(--faint)".to_string(), v: m.key(r) * k, lo: if rate { 0.0 } else { r.min }, hi: if rate { 0.0 } else { r.max }, label: if rate { val(m, r) } else { val(m, r).trim_end_matches(unit(m)).trim().to_string() }, note: "self-run · not ranked".into() });
                 }
             }
             bs = bs2;
@@ -446,7 +456,10 @@ impl<'a> Site<'a> {
                 self.row(&mut s, ed, h, "–", &cols);
             }
         }
-        for h in ed.harnesses.iter().filter(|h| h.status != "measured") {
+        for h in ed.self_runs() {
+            self.row(&mut s, ed, h, "–", &cols);
+        }
+        for h in ed.harnesses.iter().filter(|h| h.status != "measured" && h.status != "self_run") {
             write!(s, r#"<tr class="nm"><td class="rank">–</td><th scope="row" class="sticky"><a href="/harness/{}/">{}</a></th><td colspan="{}">not measurable offline: {}</td></tr>"#, hslug(h), esc(&h.name), cols.len(), esc(h.reason.as_deref().unwrap_or("see harness page"))).unwrap();
         }
         let why = format!("Ranked by {} (●).", plain(primary).map(|p| p.0).unwrap_or(primary));
@@ -455,7 +468,7 @@ impl<'a> Site<'a> {
     }
 
     fn row(&self, s: &mut String, ed: &Edition, h: &Harness, rank: &str, cols: &[(&str, &str)]) {
-        write!(s, r#"<tr><td class="rank">{rank}</td><th scope="row" class="sticky"><span class="sw" style="background:{}"></span><a href="/harness/{}/">{}</a>{}<span class="ver">{}</span></th>"#, color(ed, &h.id, 0), hslug(h), esc(&h.name), if h.provisional.is_some() { r#" <span class="prov" title="provisional: see harness page">provisional</span>"# } else { "" }, esc(&short_ver(h).rsplit(' ').next().map(|v| format!("v{}", v.trim_start_matches('v'))).unwrap_or_default())).unwrap();
+        write!(s, r#"<tr><td class="rank">{rank}</td><th scope="row" class="sticky"><span class="sw" style="background:{}"></span><a href="/harness/{}/">{}</a>{}<span class="ver">{}</span></th>"#, color(ed, &h.id, 0), hslug(h), esc(&h.name), if h.status == "self_run" { r#" <span class="prov" title="run by the maintainer, who also writes this harness; not ranked">self-run</span>"# } else if h.provisional.is_some() { r#" <span class="prov" title="provisional: see harness page">provisional</span>"# } else { "" }, esc(&short_ver(h).rsplit(' ').next().map(|v| format!("v{}", v.trim_start_matches('v'))).unwrap_or_default())).unwrap();
         for (m, _) in cols {
             s.push_str(&self.cell(ed, h, m));
         }
@@ -702,7 +715,7 @@ impl<'a> Site<'a> {
         let sl = hslug(h);
         let mut b = String::new();
         write!(b, r#"<div class="wrap"><section class="hero solo"><div><p class="eyebrow"><a href="/harnesses/">Harnesses</a> · edition {}</p><h1><span class="sw" style="background:{};width:.3em;height:.3em;vertical-align:.3em;margin-right:.18em"></span>{}</h1>"#, esc(&ed.id), color(ed, &h.id, 0), esc(&h.name)).unwrap();
-        if h.status != "measured" {
+        if h.status != "measured" && h.status != "self_run" {
             write!(b, r#"<p class="lede">Not measurable: {}.</p><p>A harness is measurable when it can talk to a model endpoint we choose, so every harness sees the same deterministic mock. <a href="/submit/">What it takes to be ranked</a>.</p></div></section></div>"#, esc(h.reason.as_deref().unwrap_or("no reason recorded"))).unwrap();
             let og = Og { kicker: "Harness".into(), title: h.name.clone(), sub: format!("Not measurable: {}", h.reason.clone().unwrap_or_default()), stat: None, bars: vec![], prelim: ed.preliminary() };
             self.page(&format!("/harness/{sl}/"), &h.name, &format!("{} is not measurable offline on AgentRAMBench: {}.", h.name, h.reason.clone().unwrap_or_default().trim_end_matches('.')), og, &b);
@@ -712,13 +725,24 @@ impl<'a> Site<'a> {
         let pl = plain(pm).map(|p| p.0).unwrap_or(pm);
         let fd = ed.result(&h.id, pm);
         let n = ed.measured().len();
+        if h.status == "self_run" {
+            b.push_str(r#"<div class="notice" role="note"><b>Self-run, not ranked.</b> Run by the maintainer of AgentRAMBench, who also writes this harness, with the edition's runner and mock. Not part of the ranking, the findings or the badges."#);
+            if let Some(ns) = &h.notes {
+                b.push_str("<ul>");
+                for x in ns {
+                    write!(b, "<li>{}</li>", esc(x)).unwrap();
+                }
+                b.push_str("</ul>");
+            }
+            b.push_str("</div>");
+        }
         if let Some(p) = &h.provisional {
             write!(b, r#"<div class="notice" role="note"><b>Provisional.</b> {}</div>"#, esc(p)).unwrap();
         }
         b.push_str(r#"<div class="hgrid"><div>"#);
         let stat = if let Some(r) = fd {
-            let rank = ed.ranking(pm).iter().find(|x| x.1.id == h.id).map(|x| x.0).unwrap_or(0);
-            write!(b, r#"<div class="stat">{}</div><p class="eyebrow" style="margin-top:8px">MiB · {} · rank {rank} of {n}</p>"#, num(r.median), esc(pl)).unwrap();
+            let rank = ed.ranking(pm).iter().find(|x| x.1.id == h.id).map(|x| format!("rank {} of {n}", x.0)).unwrap_or_else(|| "not ranked".into());
+            write!(b, r#"<div class="stat">{}</div><p class="eyebrow" style="margin-top:8px">MiB · {} · {rank}</p>"#, num(r.median), esc(pl)).unwrap();
             Some((num(r.median), format!("MiB · {pl}")))
         } else if let Some(r) = ed.result(&h.id, "task_anon_mib") {
             write!(b, r#"<div class="stat">{}</div><p class="eyebrow" style="margin-top:8px">MiB private RAM for one task · fleet run pending</p>"#, num(r.median)).unwrap();
@@ -760,7 +784,7 @@ impl<'a> Site<'a> {
         let ed = self.ed();
         let mut b = String::from(r#"<div class="wrap"><section class="hero solo"><div><p class="eyebrow">Harnesses</p><h1>Who is on the bench</h1><p class="lede">Every harness runs unmodified, at a pinned version, pointed at the same local mock model. Anything we had to change from the defaults is listed. Not on the list? <a href="/submit/">Send a pull request</a>.</p></div></section><div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Harness</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Non-default setup</th></tr></thead><tbody>"#);
         for h in &ed.harnesses {
-            let st = if h.status == "measured" { "measured".to_string() } else { format!("not measurable offline: {}", h.reason.clone().unwrap_or_default()) };
+            let st = if h.status == "measured" { "measured".to_string() } else if h.status == "self_run" { "self-run by the maintainer, not ranked".to_string() } else { format!("not measurable offline: {}", h.reason.clone().unwrap_or_default()) };
             write!(b, r#"<tr><th scope="row" class="sticky"><span class="sw" style="background:{}"></span><a href="/harness/{}/">{}</a></th><td class="mono">{}</td><td>{}</td><td class="mono" style="font-size:12px;min-width:280px">{}</td></tr>"#, color(ed, &h.id, 0), hslug(h), esc(&h.name), esc(h.version.as_deref().unwrap_or("–")), esc(&st), esc(h.non_default_flags.as_deref().unwrap_or("–"))).unwrap();
         }
         b.push_str("</tbody></table></div></div>");

@@ -45,6 +45,7 @@ pub struct Harness {
     pub non_default_flags: Option<String>,
     pub reason: Option<String>,
     pub provisional: Option<String>,
+    pub notes: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -143,6 +144,26 @@ impl Edition {
             let er = e.errata.clone();
             e.results.retain(|r| !er.iter().any(|x| x.harness == r.harness && x.metrics.contains(&r.metric)));
         }
+        let sd = path.parent().and_then(|d| d.parent()).map(|d| d.join("selfrun").join(&e.id));
+        if let Some(Ok(rd)) = sd.map(std::fs::read_dir) {
+            let mut fs: Vec<_> = rd.filter_map(|x| x.ok().map(|x| x.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+            fs.sort();
+            for f in fs {
+                let txt = std::fs::read_to_string(&f).map_err(|x| format!("{}: {x}", f.display()))?;
+                let x: Edition = serde_json::from_str(&txt).map_err(|err| format!("{}: {err}", f.display()))?;
+                for mut h in x.harnesses.into_iter().filter(|h| h.status == "self_run") {
+                    let id = h.id.clone();
+                    e.results.extend(x.results.iter().filter(|r| r.harness == id).cloned());
+                    h.status = "self_run".into();
+                    e.harnesses.push(h);
+                }
+                for m in x.metrics {
+                    if e.metric(&m.id).is_none() {
+                        e.metrics.push(m);
+                    }
+                }
+            }
+        }
         Ok(e)
     }
 
@@ -174,8 +195,16 @@ impl Edition {
             .max_by_key(|r| (r.hold_s.unwrap_or(0.0) as u64, r.n_agents))
     }
 
+    pub fn ranked_id(&self, id: &str) -> bool {
+        self.harnesses.iter().any(|h| h.id == id && h.status == "measured")
+    }
+
+    pub fn self_runs(&self) -> Vec<&Harness> {
+        self.harnesses.iter().filter(|h| h.status == "self_run").collect()
+    }
+
     pub fn common_steps(&self, metric: &str) -> Option<u32> {
-        let rs: Vec<&Res> = self.results.iter().filter(|r| r.metric == metric && r.steps.is_some()).collect();
+        let rs: Vec<&Res> = self.results.iter().filter(|r| r.metric == metric && r.steps.is_some() && self.ranked_id(&r.harness)).collect();
         let mut hs: Vec<&str> = rs.iter().map(|r| r.harness.as_str()).collect();
         hs.sort();
         hs.dedup();
@@ -186,7 +215,7 @@ impl Edition {
     }
 
     pub fn common_n(&self, metric: &str) -> Option<u32> {
-        let rs: Vec<&Res> = self.results.iter().filter(|r| r.metric == metric && r.n_agents > 1).collect();
+        let rs: Vec<&Res> = self.results.iter().filter(|r| r.metric == metric && r.n_agents > 1 && self.ranked_id(&r.harness)).collect();
         let mut hs: Vec<&str> = rs.iter().map(|r| r.harness.as_str()).collect();
         hs.sort();
         hs.dedup();
