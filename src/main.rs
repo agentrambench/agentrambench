@@ -21,7 +21,9 @@ fn build(data: &Path, out: &Path) -> Result<(), String> {
     let mut s = site::Site { eds: &eds, out: out.to_path_buf(), og: vec![], pages: vec![] };
     s.home();
     for a in &site::AXES {
-        s.axis(a);
+        if a.id != "hostile" || eds[0].has_axis("hostile") {
+            s.axis(a);
+        }
     }
     for h in &eds[0].harnesses {
         s.harness(h);

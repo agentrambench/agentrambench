@@ -2,7 +2,7 @@ import sys,collections
 from playwright.sync_api import sync_playwright
 AXE=open('/home/sr/.cache/agentrambench/axe.min.js').read()
 B=sys.argv[1]
-pages=['/','/fleet/','/resources/','/failures/','/tokens/','/governance/','/harnesses/','/harness/pi/','/method/','/data/','/editions/','/submit/','/about/','/nope']
+pages=['/','/fleet/','/resources/','/failures/','/hostile/','/tokens/','/governance/','/harnesses/','/harness/pi/','/method/','/data/','/editions/','/submit/','/about/','/nope']
 agg={}
 with sync_playwright() as p:
     b=p.chromium.launch()

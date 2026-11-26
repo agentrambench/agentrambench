@@ -60,6 +60,7 @@ pub struct Metric {
     pub headline: bool,
     pub note: Option<String>,
     pub in_totals: Option<bool>,
+    pub group: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -83,6 +84,8 @@ pub struct Res {
     #[serde(default)]
     pub session_mb: Option<f64>,
     pub grow_note: Option<String>,
+    pub applicable: Option<u32>,
+    pub na: Option<u32>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -116,6 +119,10 @@ pub struct Edition {
     pub withheld: BTreeMap<String, Gap>,
     #[serde(default)]
     pub not_measured: BTreeMap<String, BTreeMap<String, Gap>>,
+    #[serde(default)]
+    pub hostile_labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub hostile_na: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl Metric {
@@ -172,9 +179,18 @@ impl Edition {
     }
 
     pub fn gap(&self, harness: &str, metric: &str) -> Option<&str> {
+        if let Some(c) = metric.strip_prefix("hostile_").and_then(|x| x.rsplit_once('_')).map(|x| x.0) {
+            if let Some(w) = self.hostile_na.get(harness).and_then(|m| m.get(c)) {
+                return Some(w.as_str());
+            }
+        }
         let has = |g: &Gap| g.metrics.iter().any(|m| m == metric);
         self.withheld.get(harness).filter(|g| has(g)).map(|g| g.reason.as_str())
             .or_else(|| self.not_measured.get(harness).and_then(|m| m.values().find(|g| has(g))).map(|g| g.reason.as_str()))
+    }
+
+    pub fn has_axis(&self, axis: &str) -> bool {
+        self.metrics.iter().any(|m| m.axis == axis && self.has_data(&m.id))
     }
 
     pub fn preliminary(&self) -> bool {

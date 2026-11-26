@@ -222,6 +222,9 @@ pub fn short(id: &str, m: Option<&Metric>) -> String {
     if let Some((t, _)) = plain(id) {
         return t.to_string();
     }
+    if let Some(t) = id.strip_prefix("hostile_").and_then(|x| x.strip_suffix("_leak")).and_then(hostile_plain) {
+        return format!("Leak: {t}");
+    }
     let crash = |c: &str| match c { "sigterm" => "Stopped cleanly", "kill9" => "Crash during a command", "scope" => "Everything killed", "term" => "Terminal closed", "stream" => "Crash mid-answer", _ => "Crash" };
     if let Some(c) = id.strip_prefix("crash_").and_then(|x| x.strip_suffix("_recovered_alone")) {
         return format!("{}: finished alone", crash(c));
@@ -243,11 +246,12 @@ pub struct Axis {
     pub coming: bool,
 }
 
-pub const AXES: [Axis; 5] = [
+pub const AXES: [Axis; 6] = [
     Axis { id: "fleet", slug: "fleet", title: "Fleet", blurb: "How many idle agents fit in a GiB of RAM, and the largest fleet that started and stayed alive.", coming: false },
     Axis { id: "resources", slug: "resources", title: "Resources", blurb: "Memory and CPU each agent uses, working and waiting. Start-up time. Disk.", coming: false },
     Axis { id: "reliability", slug: "failures", title: "Failures", blurb: "What happens when the agent crashes, its terminal closes, the network drops or the AI provider fails.", coming: false },
     Axis { id: "tokens", slug: "tokens", title: "Context weight", blurb: "What the agent sends the model before it reads your code. Sent with every request; cached after the first, but it still fills the context.", coming: false },
+    Axis { id: "hostile", slug: "hostile", title: "Hostile inputs", blurb: "What happens when a web page, a file or the AI provider sends something built to break the agent: endless lines, compression bombs, huge files, deeply nested data.", coming: false },
     Axis { id: "governance", slug: "governance", title: "Governance", blurb: "Data sent somewhere other than the AI model, and whether planted secrets leak. Full section next edition.", coming: true },
 ];
 
@@ -366,7 +370,7 @@ impl<'a> Site<'a> {
                 }
             }
             bs = bs2;
-            let base = plain(mid).map(|p| p.1.to_string()).unwrap_or_else(|| if m.label != title { m.label.clone() } else { m.note.clone().unwrap_or_default() });
+            let base = plain(mid).map(|p| p.1.to_string()).or_else(|| mid.ends_with("_leak").then(|| "Hostile-input case: did a secret, a header or a request reach a place it must not? Count of runs where it did.".to_string())).unwrap_or_else(|| if m.label != title { m.label.clone() } else { m.note.clone().unwrap_or_default() });
             src = rk.iter().map(|x| x.2.source.clone()).collect::<Vec<_>>();
             better = if m.better == "higher" { "Higher is better" } else { "Lower is better" };
             sub = if !short_sub.is_empty() { short_sub.to_string() } else if unit(m).is_empty() || plain(mid).is_some() { base } else { format!("{base} · {}", unit(m)) };
@@ -527,9 +531,13 @@ impl<'a> Site<'a> {
 {}   # ≈{} min, local mock model, $0, no API key</code></pre><p class="mut" style="font-size:14px">The quick profile runs the fixed task ×3, kill -9 and closed-terminal crashes, three faults (429 ×3, cut stream, network reset) and a 5-agent fleet held for 5 minutes, for every harness installed. Published editions use the full profile, every harness on the same machine. <a href="/method/">Method</a>.</p>"#, esc(&repo), esc(&dir), esc(&cmd), r.minutes.map(|m| format!("{m:.0}")).unwrap_or("30".into()))
     }
 
-    fn pills(cur: &str) -> String {
+    fn pills(&self, cur: &str) -> String {
         let mut s = String::from(r#"<nav class="pills" aria-label="Axes">"#);
-        for (href, t) in [("/", "Overview"), ("/fleet/", "Fleet"), ("/resources/", "Resources"), ("/failures/", "Failures"), ("/tokens/", "Context weight"), ("/governance/", "Governance")] {
+        let hostile = self.ed().has_axis("hostile");
+        for (href, t) in [("/", "Overview"), ("/fleet/", "Fleet"), ("/resources/", "Resources"), ("/failures/", "Failures"), ("/hostile/", "Hostile inputs"), ("/tokens/", "Context weight"), ("/governance/", "Governance")] {
+            if href == "/hostile/" && !hostile {
+                continue;
+            }
             let c = if href == cur { r#" aria-current="page""# } else { "" };
             write!(s, r#"<a href="{href}"{c}>{t}</a>"#).unwrap();
         }
@@ -544,7 +552,7 @@ impl<'a> Site<'a> {
         write!(b, r#"<div class="wrap"><section class="hero"><div><p class="eyebrow">Edition {} · {} harnesses · measured {}</p><h1 style="margin-top:12px">How much RAM does your AI agent harness eat?</h1><p class="lede">How much memory and CPU coding agents like Claude Code and Codex CLI use, and what happens when something breaks.</p></div>"#, esc(&ed.id), n, esc(&ed.measured_span())).unwrap();
         b.push_str(&self.findings(ed));
         b.push_str("</section>");
-        b.push_str(&Self::pills("/"));
+        b.push_str(&self.pills("/"));
         b.push_str(r#"<div class="grid">"#);
         let cards = [
             ("burst_peak_anon_mib_per_agent", "/resources/#burst_peak_anon_mib_per_agent"),
@@ -626,6 +634,73 @@ impl<'a> Site<'a> {
         s
     }
 
+    fn hostile_groups(&self, ed: &Edition) -> String {
+        let mut cards = Vec::new();
+        for (g, title, sub) in HOSTILE_GROUPS {
+            let mid = format!("hostile_group_{g}");
+            let mut bs: Vec<chart::Bar> = ed.measured().iter().filter_map(|h| {
+                let r = ed.result(&h.id, &mid)?;
+                let n = r.applicable.filter(|n| *n > 0)?;
+                Some(chart::Bar { name: h.name.clone(), color: color(ed, &h.id, 0), v: r.median / n as f64 * 100.0, lo: 0.0, hi: 0.0, label: tally(r.median, n as usize), note: r.na.filter(|x| *x > 0).map(|x| format!("{x} n/a")).unwrap_or_default() })
+            }).collect();
+            if bs.is_empty() {
+                continue;
+            }
+            bs.sort_by(|a, b| b.v.partial_cmp(&a.v).unwrap());
+            let none: Vec<String> = ed.measured().iter().filter(|h| !bs.iter().any(|b| b.name == h.name)).map(|h| h.name.clone()).collect();
+            let foot = if none.is_empty() { "Points out of the cases that apply".to_string() } else { format!("Points out of the cases that apply · No such tool: {}", none.join(", ")) };
+            cards.push(format!(r##"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · Higher is better</p>{}<div class="foot"><span>{}</span><a href="#cases-{g}">Cases →</a></div></section>"##, esc(&mid), title, sub, chart::bars(&bs, title), esc(&foot)));
+        }
+        if cards.is_empty() {
+            return String::new();
+        }
+        format!(r#"<h2>By kind of input</h2><div class="grid two">{}</div>"#, cards.join(""))
+    }
+
+    fn hostile_matrix(&self, ed: &Edition) -> String {
+        let hs = ed.measured();
+        let mut s = String::from(r#"<h2 id="cases">Every case</h2>"#);
+        for (g, title, _) in HOSTILE_GROUPS {
+            let cases: Vec<&str> = ed.metrics.iter().filter(|m| m.group.as_deref() == Some(g) && m.id.ends_with("_score")).filter_map(|m| m.id.strip_prefix("hostile_").and_then(|x| x.strip_suffix("_score"))).collect();
+            if cases.is_empty() {
+                continue;
+            }
+            write!(s, r##"<h3 id="cases-{g}" style="margin-top:28px">{title}</h3><div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Case</th>"##).unwrap();
+            for h in &hs {
+                write!(s, r#"<th scope="col">{}</th>"#, esc(&h.name)).unwrap();
+            }
+            s.push_str("</tr></thead><tbody>");
+            for c in cases {
+                let tech = ed.hostile_labels.get(c).cloned().unwrap_or_default();
+                write!(s, r#"<tr><th scope="row" class="sticky">{}<span class="ver">{} · {}</span></th>"#, esc(hostile_plain(c).unwrap_or(&tech)), esc(c), esc(&tech)).unwrap();
+                for h in &hs {
+                    let r = ed.result(&h.id, &format!("hostile_{c}_score"));
+                    let why = ed.hostile_na.get(&h.id).and_then(|m| m.get(c));
+                    match (r, why) {
+                        (Some(r), _) => {
+                            let comp = |k: &str| ed.result(&h.id, &format!("hostile_{c}_{k}")).map(|x| x.median);
+                            let mut t = Vec::new();
+                            if let Some(x) = comp("rss_delta_mib") { t.push(format!("memory {}{} MiB", if x >= 0.0 { "+" } else { "" }, num(x))); }
+                            if let Some(x) = comp("result_s") { t.push(format!("{} s", num(x))); }
+                            if comp("crashed") == Some(1.0) { t.push("crashed".into()); }
+                            if comp("turn2_resumed") == Some(0.0) { t.push("follow-up failed".into()); }
+                            let leak = ed.result(&h.id, &format!("hostile_{c}_leak")).is_some_and(|x| x.median > 0.0);
+                            if leak { t.push("leaked: see Governance".into()); }
+                            let g = if r.median == 0.5 { "0.5".to_string() } else { format!("{}", r.median) };
+                            write!(s, r#"<td class="mono grade g{}" title="{}">{}{}</td>"#, (r.median * 10.0).round() as u32, esc(&t.join(", ")), g, if leak { r#" <a href="/governance/#hostile_"# .to_string() + c + r#"_leak" class="prov">leak</a>"# } else { String::new() }).unwrap();
+                        }
+                        (None, Some(w)) => write!(s, r#"<td class="pend" title="{}">n/a</td>"#, esc(w)).unwrap(),
+                        _ => s.push_str(r#"<td class="pend">–</td>"#),
+                    }
+                }
+                s.push_str("</tr>");
+            }
+            s.push_str("</tbody></table></div>");
+        }
+        s.push_str(r#"<p class="mut" style="font-size:13px">1 = handled, 0.5 = degraded, 0 = crash, hang or broken follow-up. Hover a cell for memory growth, time and reason. Leaks (a redirect followed to a private address, a header sent to another host) are on the <a href="/governance/">Governance</a> page.</p>"#);
+        s
+    }
+
     fn fault_matrix(&self, ed: &Edition) -> String {
         let sfx = ed.fault_suffix();
         let profs: Vec<String> = ed.metrics.iter().filter_map(|m| m.id.strip_prefix("fault_").and_then(|x| x.strip_suffix(sfx)).map(String::from)).filter(|p| ed.has_data(&format!("fault_{p}{sfx}"))).collect();
@@ -667,7 +742,7 @@ impl<'a> Site<'a> {
     pub fn axis(&mut self, a: &'static Axis) {
         let ed = self.ed();
         let mut b = String::new();
-        write!(b, r#"<div class="wrap"><section class="hero solo"><div><p class="eyebrow">Axis · edition {}</p><h1>{}</h1><p class="lede">{}</p></div></section>{}"#, esc(&ed.id), a.title, a.blurb, Self::pills(&format!("/{}/", a.slug))).unwrap();
+        write!(b, r#"<div class="wrap"><section class="hero solo"><div><p class="eyebrow">Axis · edition {}</p><h1>{}</h1><p class="lede">{}</p></div></section>{}"#, esc(&ed.id), a.title, a.blurb, self.pills(&format!("/{}/", a.slug))).unwrap();
         if a.id == "fleet" {
         }
         if a.id == "reliability" {
@@ -676,7 +751,12 @@ impl<'a> Site<'a> {
             b.push_str(r#"<h2 id="faults">Provider and network faults</h2><p>Our mock model fails on purpose after its first answer: too many requests, rejected key, overload, network cuts, silence, broken answers. Each row is one kind of failure.</p>"#);
             b.push_str(&self.fault_matrix(ed));
         }
-        let mut ms: Vec<&Metric> = ed.metrics.iter().filter(|m| m.axis == a.id && !(a.id == "reliability" && (m.id.starts_with("crash_") || m.id.starts_with("fault_")))).collect();
+        if a.id == "hostile" {
+            b.push_str(r#"<p>The mock model asks each agent to use its own tool (web fetch, file read) on something built to break it, then asks a normal follow-up question in the same session. Score per case: 1 = handled (result or clear error, memory growth under 256 MiB, no hang), 0.5 = survived but degraded (memory over 256 MiB, very slow, or page text silently lost), 0 = crash, out of memory, hang, or the follow-up no longer works. Cases come from bugs found while hardening harnesses on this machine and from public reports. A case is n/a when the harness has no such tool or never reached the hostile input; the reason is shown on hover.</p>"#);
+            b.push_str(&self.hostile_groups(ed));
+            b.push_str(&self.hostile_matrix(ed));
+        }
+        let mut ms: Vec<&Metric> = ed.metrics.iter().filter(|m| m.axis == a.id && !(a.id == "reliability" && (m.id.starts_with("crash_") || m.id.starts_with("fault_"))) && !m.id.starts_with("hostile_") || m.axis == "governance" && a.id == "governance" && m.id.ends_with("_leak")).collect();
         ms.sort_by_key(|m| !m.headline);
         let cards: Vec<String> = ms.iter().filter_map(|m| self.bar_card(ed, &m.id, &short(&m.id, Some(m)), "", "")).collect();
         let pending: Vec<&str> = ms.iter().filter(|m| ed.ranking(&m.id).is_empty()).map(|m| m.label.as_str()).collect();
@@ -1053,4 +1133,57 @@ fn llms_txt(ed: &Edition) -> String {
 
 fn tally(k: f64, n: usize) -> String {
     if k.fract() == 0.0 { format!("{}/{n}", k as u32) } else { format!("{k:.1}/{n}") }
+}
+
+const HOSTILE_GROUPS: [(&str, &str, &str); 5] = [
+    ("stream", "Broken data from the AI provider", "Endless lines, endless events, giant nested replies"),
+    ("files", "Hostile local files", "/dev/zero, a 300 MB one-line file, a pipe nobody writes"),
+    ("web", "Hostile web servers", "Endless headers, bombs, redirects, slow servers"),
+    ("html", "Pages built to choke the HTML reader", "Deep nesting, broken tags, character traps"),
+    ("document", "Compression and PDF bombs", "Small files that expand to gigabytes"),
+];
+
+pub fn hostile_plain(c: &str) -> Option<&'static str> {
+    Some(match c {
+        "H1-header" => "Server sends a header that never ends",
+        "H2-status" => "Server sends a status line that never ends",
+        "H3-chunk" => "Server sends a chunk size that never ends",
+        "H4-body" => "Server sends a 700 MiB page",
+        "H6-trickle" => "Server answers one byte per second",
+        "H7-slowloris" => "Server never finishes its first line",
+        "H8-crosshost" => "Redirect to another site must not carry the API key",
+        "H8-loop" => "Redirects that loop forever",
+        "H9-crlf" => "Line breaks in the address must not add a header",
+        "H11-linkamp" => "Long address plus a page of links that blows up when rewritten",
+        "H12-private" => "Public page redirects to an internal address",
+        "H13-ctlredirect" => "Control characters in a redirect",
+        "H14-nonutf8hdr" => "One odd byte in a header",
+        "H15-continue" => "Server says “continue” before the real answer",
+        "D1-pdfbomb" => "Small PDF that expands to 300 million characters",
+        "D1-pdfbomb-read" => "Same PDF read from the project folder",
+        "D2-gzipbomb" => "1 MB compressed page that expands to 1 GiB",
+        "X1-panic" => "Accented letter at a tag boundary",
+        "X2-unclosed" => "Unclosed header hides the whole page",
+        "X3-nest" => "100,000 nested blocks",
+        "X3-fuzz" => "1.5 million random tags",
+        "X4-ltnogt" => "5 MB of “<” with no closing “>”",
+        "X5-brp" => "Long runs of line breaks, then a paragraph",
+        "X6-openabr" => "Unclosed link followed by many line breaks",
+        "X7-attrs" => "One tag with a huge number of attributes",
+        "X8-endtags" => "Thousands of stray closing tags",
+        "X9-amp" => "Long runs of “&” codes",
+        "X10-mojibake" => "Long runs of garbled characters",
+        "J1-nestargs" => "Model sends a tool call nested 1,600 levels deep",
+        "J2-hugekeys" => "Model sends a tool call with 200,000 fields",
+        "J3-nesterror" => "Provider error nested 3,000 levels deep",
+        "P1-sseline" => "Provider sends one line that never ends",
+        "P2-sseevent" => "Provider sends an answer that never ends",
+        "P3-errbody" => "Provider error message that never ends",
+        "R1-devzero" => "Read /dev/zero (endless zeros)",
+        "R2-bigfile" => "Read a 300 MB file with no line breaks",
+        "R3-fifo" => "Read a pipe nobody ever writes to",
+        "R4-hugelimit" => "Read with an absurd line limit",
+        "T1-escapes" => "Command output with terminal control codes",
+        _ => return None,
+    })
 }
