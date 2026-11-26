@@ -123,6 +123,8 @@ pub struct Edition {
     pub hostile_labels: BTreeMap<String, String>,
     #[serde(default)]
     pub hostile_na: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    pub hostile_group_notes: BTreeMap<String, String>,
 }
 
 impl Metric {

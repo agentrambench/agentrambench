@@ -636,7 +636,8 @@ impl<'a> Site<'a> {
 
     fn hostile_groups(&self, ed: &Edition) -> String {
         let mut cards = Vec::new();
-        for (g, title, sub) in HOSTILE_GROUPS {
+        for (g, title, sub) in hostile_group_list(ed) {
+            let (title, sub) = (esc(&title), esc(&sub));
             let mid = format!("hostile_group_{g}");
             let mut bs: Vec<chart::Bar> = ed.measured().iter().filter_map(|h| {
                 let r = ed.result(&h.id, &mid)?;
@@ -649,7 +650,7 @@ impl<'a> Site<'a> {
             bs.sort_by(|a, b| b.v.partial_cmp(&a.v).unwrap());
             let none: Vec<String> = ed.measured().iter().filter(|h| !bs.iter().any(|b| b.name == h.name)).map(|h| h.name.clone()).collect();
             let foot = if none.is_empty() { "Points out of the cases that apply".to_string() } else { format!("Points out of the cases that apply · No such tool: {}", none.join(", ")) };
-            cards.push(format!(r##"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · Higher is better</p>{}<div class="foot"><span>{}</span><a href="#cases-{g}">Cases →</a></div></section>"##, esc(&mid), title, sub, chart::bars(&bs, title), esc(&foot)));
+            cards.push(format!(r##"<section class="card" id="{}"><h2><i style="background:var(--text)"></i>{}</h2><p class="sub">{} · Higher is better</p>{}<div class="foot"><span>{}</span><a href="#cases-{g}">Cases →</a></div></section>"##, esc(&mid), title, sub, chart::bars(&bs, &title), esc(&foot)));
         }
         if cards.is_empty() {
             return String::new();
@@ -660,12 +661,17 @@ impl<'a> Site<'a> {
     fn hostile_matrix(&self, ed: &Edition) -> String {
         let hs = ed.measured();
         let mut s = String::from(r#"<h2 id="cases">Every case</h2>"#);
-        for (g, title, _) in HOSTILE_GROUPS {
-            let cases: Vec<&str> = ed.metrics.iter().filter(|m| m.group.as_deref() == Some(g) && m.id.ends_with("_score")).filter_map(|m| m.id.strip_prefix("hostile_").and_then(|x| x.strip_suffix("_score"))).collect();
+        for (g, title, _) in hostile_group_list(ed) {
+            let title = esc(&title);
+            let cases: Vec<&str> = ed.metrics.iter().filter(|m| m.group.as_deref() == Some(g.as_str()) && m.id.ends_with("_score")).filter_map(|m| m.id.strip_prefix("hostile_").and_then(|x| x.strip_suffix("_score"))).collect();
             if cases.is_empty() {
                 continue;
             }
-            write!(s, r##"<h3 id="cases-{g}" style="margin-top:28px">{title}</h3><div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Case</th>"##).unwrap();
+            write!(s, r##"<h3 id="cases-{g}" style="margin-top:28px">{title}</h3>"##).unwrap();
+            if let Some(n) = ed.hostile_group_notes.get(&g) {
+                write!(s, r#"<p class="mut" style="font-size:14px">{}</p>"#, esc(n)).unwrap();
+            }
+            write!(s, r##"<div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Case</th>"##).unwrap();
             for h in &hs {
                 write!(s, r#"<th scope="col">{}</th>"#, esc(&h.name)).unwrap();
             }
@@ -889,6 +895,9 @@ impl<'a> Site<'a> {
 <li><b>Crash.</b> The harness is killed during a 25-second command (kill -9 on the harness only, on its whole process tree, by closing its terminal, or during the final answer), then resumed the documented way.</li>
 <li><b>Faults.</b> After the first request the mock injects 429s, 401s, 5xx, connection resets, a silent server, cut, stalled, trickling or malformed streams; plus a command that never returns, a command with 50 MB of output, and a model that never ends its turn.</li>
 <li><b>Shared quota.</b> Many agents against one rate-limited key, with and without Retry-After: how many tasks finish.</li></ul>"#);
+        if ed.has_axis("hostile") {
+            b.push_str(r#"<h2>Hostile inputs</h2><p>The mock model asks each agent to use its own tool (web fetch, file read, the provider stream itself) on input built to break it: a local server, file or stream sends endless lines, compression bombs, deep nesting or redirects to private addresses. Then a normal follow-up question in the same session checks the agent still works. Each case is graded 1 (handled), 0.5 (degraded) or 0 (crash, hang or broken follow-up), median of the runs. A case that needs a tool the harness does not have is n/a with the reason, and group scores count only the cases that apply, so there is no single hostile total. Leaks (a key or a request sent where it should not go) are pass/fail on the <a href="/governance/">Governance</a> page. Cases come from bugs found while hardening harnesses on this machine and from public reports.</p>"#);
+        }
         b.push_str(r#"<h2>How numbers are reported</h2><ul><li>When a cell has several runs, the big number is the middle value (median), with lowest–highest and every value in the JSON. Many fleet cells have one run; the leaderboard says n=1. Rates show one square per run.</li><li>Memory is private (anonymous) memory from the cgroup: what an extra agent really adds. RSS counts shared libraries once per process and is shown only as a secondary metric.</li><li>Headline: private RAM per agent 1 hour after work, terminal and launched commands included, at the largest fleet each harness ran (50; opencode 25). Per-hour figures come from the 1-hour wait, never scaled up from shorter windows. Not a weighted score. There is no overall score.</li><li>Network bytes are a lower bound (socket sampling every 2 s). Token counts are request bytes / 4, an estimate, not a tokenizer.</li><li>Ranks are per metric. Ties share a rank.</li></ul>"#);
         b.push_str(r#"<h2>Every metric in this edition</h2><div class="tbl" tabindex="0"><table><thead><tr><th scope="col" class="sticky">Metric</th><th scope="col">Axis</th><th scope="col">Better</th><th scope="col">How</th></tr></thead><tbody>"#);
         for mm in &ed.metrics {
@@ -1135,13 +1144,28 @@ fn tally(k: f64, n: usize) -> String {
     if k.fract() == 0.0 { format!("{}/{n}", k as u32) } else { format!("{k:.1}/{n}") }
 }
 
-const HOSTILE_GROUPS: [(&str, &str, &str); 5] = [
+const HOSTILE_GROUPS: [(&str, &str, &str); 8] = [
     ("stream", "Broken data from the AI provider", "Endless lines, endless events, giant nested replies"),
     ("files", "Hostile local files", "/dev/zero, a 300 MB one-line file, a pipe nobody writes"),
     ("web", "Hostile web servers", "Endless headers, bombs, redirects, slow servers"),
     ("html", "Pages built to choke the HTML reader", "Deep nesting, broken tags, character traps"),
     ("document", "Compression and PDF bombs", "Small files that expand to gigabytes"),
+    ("terminal", "Control codes in command output", "Codes that write the clipboard or move the cursor"),
+    ("search", "Hostile search results", "Odd site filters, instructions hidden in snippets"),
+    ("config", "Keys, config and other users' files", "Secrets, mixed-up keys, shadowed settings"),
 ];
+
+fn hostile_group_list(ed: &Edition) -> Vec<(String, String, String)> {
+    let mut v: Vec<(String, String, String)> = HOSTILE_GROUPS.iter().map(|(g, t, s)| (g.to_string(), t.to_string(), s.to_string())).collect();
+    for m in &ed.metrics {
+        if let Some(g) = m.group.as_deref().filter(|_| m.id.starts_with("hostile_")) {
+            if !v.iter().any(|x| x.0 == g) {
+                v.push((g.to_string(), g.to_string(), String::new()));
+            }
+        }
+    }
+    v
+}
 
 pub fn hostile_plain(c: &str) -> Option<&'static str> {
     Some(match c {
@@ -1184,6 +1208,16 @@ pub fn hostile_plain(c: &str) -> Option<&'static str> {
         "R3-fifo" => "Read a pipe nobody ever writes to",
         "R4-hugelimit" => "Read with an absurd line limit",
         "T1-escapes" => "Command output with terminal control codes",
-        _ => return None,
+        _ => match c.split('-').next()? {
+            "S1" => "Search with a site filter written another way",
+            "S2" => "Search results with hidden instructions",
+            "C1" => "Secrets in settings must not leave the machine",
+            "C2" => "One provider's key must not go to another",
+            "C3" => "Key accepted but unusable",
+            "C4" => "Built-in skill hides the user's own",
+            "C5" => "Second copy makes the first drop the user's settings",
+            "C6" => "Fresh start must not open other users' files",
+            _ => return None,
+        },
     })
 }
